@@ -25,13 +25,41 @@ const SummarySchema = z.object({
   reviewUrl: z.string(),
 })
 
+const MessageSchema = z.object({
+  id: z.string(),
+  author: z.string(),
+  kind: z.string().optional(),
+  body: z.string(),
+})
+
 const ThreadSchema = z.object({
   id: z.string(),
   status: z.string(),
   anchor: z.unknown().nullable(),
   anchorVersion: z.string().optional(),
   resolvedInVersion: z.string().optional(),
-  messages: z.array(z.object({ id: z.string(), author: z.string(), body: z.string() })),
+  messages: z.array(MessageSchema),
+})
+
+const ViewSchema = z.object({
+  version: z.string(),
+  current: z.string(),
+  artifactStatus: z.string(),
+  artifactUpdatedAt: z.string(),
+  updatedAt: z.string(),
+  iteratedAt: z.string(),
+  agentAttached: z.boolean().optional(),
+  approvedAt: z.string().optional(),
+  versions: z.array(
+    z.object({
+      version: z.string(),
+      note: z.string().optional(),
+      publishedAt: z.string().optional(),
+      approvedAt: z.string().optional(),
+      batch: z.object({ threadIds: z.array(z.string()) }).optional(),
+    }),
+  ),
+  threads: z.array(ThreadSchema),
 })
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
@@ -44,6 +72,16 @@ const createArtifact = async (title: string, html: string): Promise<z.infer<type
   })
   if (response.statusCode !== 201) throw new Error("fixture create failed: " + response.body)
   return SummarySchema.parse(response.json())
+}
+
+const createThread = async (artifactId: string, body: string) => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/artifacts/" + artifactId + "/feedback",
+    payload: { body: body },
+  })
+  expect(response.statusCode).toBe(201)
+  return ThreadSchema.parse(response.json())
 }
 
 describe("artifact api", () => {
@@ -69,10 +107,15 @@ describe("artifact api", () => {
     const detail = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id })
     expect(detail.statusCode).toBe(200)
     const detailBody = z
-      .object({ prompt: z.string(), versions: z.array(z.object({ version: z.string() })) })
+      .object({
+        prompt: z.string(),
+        iteratedAt: z.unknown().nullable(),
+        versions: z.array(z.object({ version: z.string(), publishedAt: z.string().optional() })),
+      })
       .parse(detail.json())
     expect(detailBody.prompt).toBe("")
     expect(detailBody.versions[0]?.version).toBe("v1")
+    expect(detailBody.versions[0]?.publishedAt).toBeDefined()
   })
 
   it("rejects invalid bodies with problem details", async () => {
@@ -106,6 +149,7 @@ describe("artifact api", () => {
     expect(shell.headers["content-type"]).toContain("text/html")
     expect(shell.body).toContain("redline-data")
     expect(shell.body).toContain("Serving test")
+    expect(shell.body).toContain("iterate")
 
     const gallery = await app.inject({ method: "GET", url: "/" })
     expect(gallery.statusCode).toBe(200)
@@ -167,15 +211,11 @@ describe("artifact api", () => {
     expect(ThreadSchema.parse(resolveResponse.json()).status).toBe("resolved")
 
     const view = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/feedback" })
-    const viewBody = z
-      .object({
-        threads: z.array(ThreadSchema),
-        artifactStatus: z.string(),
-        artifactUpdatedAt: z.string(),
-      })
-      .parse(view.json())
+    const viewBody = ViewSchema.parse(view.json())
     expect(viewBody.threads[0]?.status).toBe("resolved")
     expect(viewBody.artifactStatus).toBe("review")
+    expect(viewBody.agentAttached).toBe(false)
+    expect(viewBody.versions).toHaveLength(1)
   })
 
   it("creates a general comment without an anchor", async () => {
@@ -191,15 +231,118 @@ describe("artifact api", () => {
     expect(thread.messages[0]?.author).toBe("user")
   })
 
-  it("keeps threads visible across versions with pinned-on and resolved-in markers", async () => {
-    const created = await createArtifact("Cross version", "<p>v1</p>")
-    const threadResponse = await app.inject({
+  it("runs the full turn-based loop: iterate, publish, approve", async () => {
+    const created = await createArtifact("Loop test", "<p>v1 body</p>")
+
+    // Publishing before Iterate is the 409 gate.
+    const early = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions",
+      payload: { html: "<p>early</p>" },
+    })
+    expect(early.statusCode).toBe(409)
+
+    // Iterating with nothing open is a 422.
+    const empty = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(empty.statusCode).toBe(422)
+
+    const thread = await createThread(created.id, "please add a footer")
+
+    const iterated = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(iterated.statusCode).toBe(201)
+    const iteration = z
+      .object({
+        status: z.string(),
+        openThreads: z.number(),
+        version: z.object({ version: z.string(), batch: z.object({ threadIds: z.array(z.string()) }) }),
+      })
+      .parse(iterated.json())
+    expect(iteration.status).toBe("iterating")
+    expect(iteration.openThreads).toBe(1)
+    expect(iteration.version.version).toBe("v2")
+    expect(iteration.version.batch.threadIds).toEqual([thread.id])
+
+    // While iterating: new comments and resolutions are locked, replies are not.
+    const newThread = await app.inject({
       method: "POST",
       url: "/api/v1/artifacts/" + created.id + "/feedback",
-      payload: { body: "pinned on v1" },
+      payload: { body: "locked" },
     })
-    expect(threadResponse.statusCode).toBe(201)
-    const thread = ThreadSchema.parse(threadResponse.json())
+    expect(newThread.statusCode).toBe(409)
+    const resolve = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/artifacts/" + created.id + "/threads/" + thread.id,
+      payload: { status: "resolved" },
+    })
+    expect(resolve.statusCode).toBe(409)
+    const reply = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/threads/" + thread.id + "/messages",
+      payload: { body: "on it \u2014 footer lands in v2", author: "agent" },
+    })
+    expect(reply.statusCode).toBe(201)
+
+    // Approval waits for the round to finish.
+    const earlyApprove = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions/v2/approve",
+      payload: {},
+    })
+    expect(earlyApprove.statusCode).toBe(409)
+
+    const published = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions",
+      payload: { html: "<p>v2 body</p>", note: "footer added" },
+    })
+    expect(published.statusCode).toBe(201)
+    const summary = SummarySchema.parse(published.json())
+    expect(summary.status).toBe("review")
+    expect(summary.current).toBe("v2")
+    expect(summary.versionCount).toBe(2)
+
+    const oldVersion = await app.inject({ method: "GET", url: "/a/" + created.id + "/v1/index.html" })
+    expect(oldVersion.body).toContain("v1 body")
+    const newVersion = await app.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
+    expect(newVersion.body).toContain("v2 body")
+
+    const wrongVersion = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions/v1/approve",
+      payload: {},
+    })
+    expect(wrongVersion.statusCode).toBe(404)
+
+    const approved = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions/v2/approve",
+      payload: {},
+    })
+    expect(approved.statusCode).toBe(200)
+    const approvedRow = z.object({ version: z.string(), approvedAt: z.string() }).parse(approved.json())
+    expect(approvedRow.approvedAt).toBeDefined()
+
+    // Approval is data: the artifact stays in review and still iterable.
+    const view = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/feedback" })
+    const viewBody = ViewSchema.parse(view.json())
+    expect(viewBody.artifactStatus).toBe("review")
+    expect(viewBody.approvedAt).toBeDefined()
+    expect(viewBody.versions[1]?.note).toBe("footer added")
+    expect(viewBody.versions[1]?.approvedAt).toBeDefined()
+    expect(viewBody.versions[1]?.batch?.threadIds).toEqual([thread.id])
+  })
+
+  it("keeps threads visible across versions with pinned-on and resolved-in markers", async () => {
+    const created = await createArtifact("Cross version", "<p>v1</p>")
+    const thread = await createThread(created.id, "pinned on v1")
     expect(thread.anchorVersion).toBe("v1")
 
     const badVersion = await app.inject({
@@ -209,6 +352,7 @@ describe("artifact api", () => {
     })
     expect(badVersion.statusCode).toBe(404)
 
+    await app.inject({ method: "POST", url: "/api/v1/artifacts/" + created.id + "/iterations", payload: {} })
     const added = await app.inject({
       method: "POST",
       url: "/api/v1/artifacts/" + created.id + "/versions",
@@ -217,9 +361,7 @@ describe("artifact api", () => {
     expect(SummarySchema.parse(added.json()).current).toBe("v2")
 
     const view = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/feedback" })
-    const body = z
-      .object({ version: z.string(), threads: z.array(ThreadSchema) })
-      .parse(view.json())
+    const body = ViewSchema.parse(view.json())
     expect(body.version).toBe("v2")
     expect(body.threads).toHaveLength(1)
     expect(body.threads[0]?.anchorVersion).toBe("v1")
@@ -233,14 +375,14 @@ describe("artifact api", () => {
       method: "GET",
       url: "/api/v1/artifacts/" + created.id + "/feedback",
     })
-    const resolvedBody = z.object({ threads: z.array(ThreadSchema) }).parse(resolvedView.json())
+    const resolvedBody = ViewSchema.parse(resolvedView.json())
     expect(resolvedBody.threads[0]?.resolvedInVersion).toBe("v2")
 
     const v1View = await app.inject({
       method: "GET",
       url: "/api/v1/artifacts/" + created.id + "/feedback?version=v1",
     })
-    const v1Body = z.object({ version: z.string(), threads: z.array(ThreadSchema) }).parse(v1View.json())
+    const v1Body = ViewSchema.parse(v1View.json())
     expect(v1Body.version).toBe("v1")
     expect(v1Body.threads).toHaveLength(1)
 
@@ -253,12 +395,7 @@ describe("artifact api", () => {
 
   it("wakes a long-poll when feedback changes", async () => {
     const created = await createArtifact("Poll test", "<p>x</p>")
-    const threadResponse = await app.inject({
-      method: "POST",
-      url: "/api/v1/artifacts/" + created.id + "/feedback",
-      payload: { body: "comment one" },
-    })
-    const thread = ThreadSchema.parse(threadResponse.json())
+    const thread = await createThread(created.id, "comment one")
 
     const after = new Date(Date.now() + 80).toISOString()
     const poller = app.inject({
@@ -277,8 +414,37 @@ describe("artifact api", () => {
     })
     const polled = await poller
     expect(polled.statusCode).toBe(200)
-    const body = z.object({ threads: z.array(ThreadSchema) }).parse(polled.json())
+    const body = ViewSchema.parse(polled.json())
     expect(body.threads[0]?.status).toBe("resolved")
+    expect(body.agentAttached).toBe(true)
+  })
+
+  it("wakes a long-poll when an iteration is submitted", async () => {
+    const created = await createArtifact("Iterate poll test", "<p>x</p>")
+    await createThread(created.id, "iterate me")
+
+    const after = new Date(Date.now() + 80).toISOString()
+    const poller = app.inject({
+      method: "GET",
+      url:
+        "/api/v1/artifacts/" +
+        created.id +
+        "/feedback?wait=5&after=" +
+        encodeURIComponent(after),
+    })
+    await sleep(300)
+    const iterated = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(iterated.statusCode).toBe(201)
+    const polled = await poller
+    expect(polled.statusCode).toBe(200)
+    const body = ViewSchema.parse(polled.json())
+    expect(body.artifactStatus).toBe("iterating")
+    expect(body.iteratedAt).not.toBe("1970-01-01T00:00:00.000Z")
+    expect(body.versions[1]?.batch?.threadIds).toHaveLength(1)
   })
 
   it("times out a long-poll without changes", async () => {
@@ -291,32 +457,76 @@ describe("artifact api", () => {
     })
     expect(Date.now() - started).toBeGreaterThanOrEqual(900)
     expect(response.statusCode).toBe(200)
-    expect(z.object({ artifactStatus: z.string() }).parse(response.json()).artifactStatus).toBe("review")
+    expect(ViewSchema.parse(response.json()).artifactStatus).toBe("review")
   })
 
-  it("adds versions and approves", async () => {
-    const created = await createArtifact("Version test", "<p>v1 body</p>")
-    const added = await app.inject({
-      method: "POST",
-      url: "/api/v1/artifacts/" + created.id + "/versions",
-      payload: { html: "<p>v2 body</p>", note: "second pass" },
+  it("inserts thinking placeholders only while attached and in review", async () => {
+    const created = await createArtifact("Placeholder test", "<p>x</p>")
+
+    // Not attached: plain comment, no placeholder.
+    const detached = await createThread(created.id, "nobody is home")
+    expect(detached.messages).toHaveLength(1)
+
+    // Attach a waiter, then comment: the server answers with a placeholder.
+    const after = new Date(Date.now() + 50_000).toISOString()
+    const poller = app.inject({
+      method: "GET",
+      url:
+        "/api/v1/artifacts/" +
+        created.id +
+        "/feedback?wait=2&after=" +
+        encodeURIComponent(after),
     })
-    expect(added.statusCode).toBe(201)
-    const summary = SummarySchema.parse(added.json())
-    expect(summary.current).toBe("v2")
-    expect(summary.versionCount).toBe(2)
+    await sleep(300)
 
-    const oldVersion = await app.inject({ method: "GET", url: "/a/" + created.id + "/v1/index.html" })
-    expect(oldVersion.body).toContain("v1 body")
-    const newVersion = await app.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
-    expect(newVersion.body).toContain("v2 body")
+    const attached = await createThread(created.id, "now somebody is home")
+    expect(attached.messages).toHaveLength(2)
+    expect(attached.messages[1]?.kind).toBe("thinking")
+    expect(attached.messages[1]?.author).toBe("agent")
 
-    const approved = await app.inject({
+    // The agent replaces the placeholder with a real answer.
+    const placeholderId = attached.messages[1]?.id
+    const patched = await app.inject({
       method: "PATCH",
-      url: "/api/v1/artifacts/" + created.id,
-      payload: { status: "approved" },
+      url:
+        "/api/v1/artifacts/" +
+        created.id +
+        "/threads/" +
+        attached.id +
+        "/messages/" +
+        placeholderId,
+      payload: { body: "will fold this into the next iteration" },
     })
-    expect(approved.statusCode).toBe(200)
-    expect(SummarySchema.parse(approved.json()).status).toBe("approved")
+    expect(patched.statusCode).toBe(200)
+    const answered = ThreadSchema.parse(patched.json())
+    expect(answered.messages[1]?.kind).toBe("text")
+    expect(answered.messages[1]?.body).toBe("will fold this into the next iteration")
+
+    // Placeholders are the only editable messages.
+    const userMessage = await app.inject({
+      method: "PATCH",
+      url:
+        "/api/v1/artifacts/" +
+        created.id +
+        "/threads/" +
+        attached.id +
+        "/messages/" +
+        attached.messages[0]?.id,
+      payload: { body: "rewriting history" },
+    })
+    expect(userMessage.statusCode).toBe(404)
+
+    // Replies to an attached thread get their own placeholder.
+    const reply = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/threads/" + attached.id + "/messages",
+      payload: { body: "thanks" },
+    })
+    const replied = ThreadSchema.parse(reply.json())
+    expect(replied.messages[replied.messages.length - 1]?.kind).toBe("thinking")
+
+    await poller
+    const view = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/feedback" })
+    expect(ViewSchema.parse(view.json()).agentAttached).toBe(false)
   })
 })

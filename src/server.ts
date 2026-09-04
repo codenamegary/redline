@@ -33,8 +33,8 @@ export const buildServer = (options: ServerOptions): FastifyInstance => {
       return sendProblem(reply, 400, "Invalid request", detail)
     }
     if (isStoreError(error)) {
-      const status = error.kind === "not-found" ? 404 : 409
-      const title = status === 404 ? "Not found" : "Conflict"
+      const status = error.kind === "not-found" ? 404 : error.kind === "unprocessable" ? 422 : 409
+      const title = status === 404 ? "Not found" : status === 422 ? "Unprocessable request" : "Conflict"
       return sendProblem(reply, status, title, error.message)
     }
     const status = errorStatus(error) ?? 500

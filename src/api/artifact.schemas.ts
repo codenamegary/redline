@@ -3,7 +3,6 @@ import { z } from "zod"
 import {
   AnchorSchema,
   ArtifactIdSchema,
-  ArtifactStatusSchema,
   AuthorSchema,
   IsoTimestampSchema,
   ThreadStatusSchema,
@@ -15,6 +14,17 @@ export const IdParamsSchema = z.object({ id: ArtifactIdSchema })
 export const ThreadParamsSchema = z.object({
   id: ArtifactIdSchema,
   threadId: z.string().min(1),
+})
+
+export const MessageParamsSchema = z.object({
+  id: ArtifactIdSchema,
+  threadId: z.string().min(1),
+  messageId: z.string().min(1),
+})
+
+export const ApproveParamsSchema = z.object({
+  id: ArtifactIdSchema,
+  version: VersionSchema,
 })
 
 export const CreateArtifactBodySchema = z.object({
@@ -31,7 +41,9 @@ export const AddVersionBodySchema = z.object({
   note: z.string().max(500).optional(),
 })
 
-export const PatchArtifactBodySchema = z.object({ status: ArtifactStatusSchema })
+export const PatchMessageBodySchema = z.object({
+  body: z.string().min(1).max(10000),
+})
 
 export const CreateThreadBodySchema = z.object({
   version: VersionSchema.optional(),

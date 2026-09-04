@@ -22,9 +22,27 @@ const clientScript = `(function () {
   var composerTarget = document.getElementById("composer-target")
   var versionSelect = document.getElementById("version")
   var statusEl = document.getElementById("status")
+  var presenceEl = document.getElementById("presence")
+  var presenceLabel = document.getElementById("presence-label")
+  var bannerEl = document.getElementById("banner")
+  var iterateBtn = document.getElementById("iterate")
   var approveBtn = document.getElementById("approve")
   var pinBtn = document.getElementById("pin-mode")
-  var state = { version: data.current, threads: [], artifactStatus: data.status, pinMode: false, anchor: null, snapshot: "", expanded: {} }
+  var generalBtn = document.getElementById("general-btn")
+  var state = {
+    version: data.current,
+    current: data.current,
+    status: data.status,
+    attached: false,
+    threads: [],
+    versions: data.versions,
+    pinMode: false,
+    anchor: null,
+    snapshot: "",
+    expanded: {},
+    followCurrent: true,
+    selectSnapshot: ""
+  }
 
   function api(path, options) {
     return fetch(data.apiBase + path, options).then(function (response) {
@@ -45,11 +63,26 @@ const clientScript = `(function () {
     return "/artifacts/" + data.artifactId + "/feedback"
   }
 
+  function pendingVersion() {
+    for (var i = 0; i < state.versions.length; i++) {
+      var entry = state.versions[i]
+      if (entry.batch && !entry.publishedAt) return entry
+    }
+    return null
+  }
+
   function refresh() {
     return api(feedbackUrl()).then(function (view) {
       state.threads = view.threads
-      state.artifactStatus = view.artifactStatus
-      state.snapshot = JSON.stringify([view.artifactStatus, view.threads])
+      state.status = view.artifactStatus
+      state.attached = view.agentAttached === true
+      state.current = view.current
+      state.versions = view.versions
+      // Auto-follow: when a new version is published, load it — unless the
+      // user deliberately switched to an older version.
+      if (state.followCurrent && state.status === "review" && state.current !== state.version) {
+        switchPreview(state.current)
+      }
       render()
     })
   }
@@ -76,16 +109,39 @@ const clientScript = `(function () {
   }
 
   function render() {
+    initVersionSelect()
     renderHeader()
     renderThreads()
     renderPins()
   }
 
   function renderHeader() {
-    var label = state.artifactStatus === "approved" ? "approved" : state.artifactStatus === "review" ? "in review" : "draft"
-    statusEl.textContent = label
-    statusEl.className = "pill " + label
-    approveBtn.textContent = state.artifactStatus === "approved" ? "Reopen review" : "Approve"
+    var iterating = state.status === "iterating"
+    var review = state.status === "review"
+    statusEl.textContent = iterating ? "iterating" : review ? "in review" : "draft"
+    statusEl.className = "pill " + state.status
+    presenceEl.className = "presence " + (iterating ? "working" : state.attached ? "on" : "off")
+    presenceLabel.textContent = iterating ? "agent working" : state.attached ? "agent listening" : "agent not attached"
+    iterateBtn.disabled = !review || !state.attached
+    iterateBtn.title = iterating
+      ? "Agent is already iterating"
+      : review && !state.attached
+        ? "Agent not attached - nudge it in chat, then Iterate"
+        : "Send open threads to the agent as one batch"
+    approveBtn.disabled = !review
+    approveBtn.title = review ? "Done for now: approve " + state.current + " (always iterable later)" : "Finish the iterating round first"
+    generalBtn.disabled = !review
+    pinBtn.disabled = !review || state.pinMode
+    if (!review && state.pinMode) setPinMode(false)
+    var pending = pendingVersion()
+    if (iterating && pending) {
+      var count = pending.batch && pending.batch.threadIds ? pending.batch.threadIds.length : 0
+      bannerEl.textContent =
+        "Agent is iterating \\u2192 " + pending.version + " (" + String(count) + " thread" + (count === 1 ? "" : "s") + " in batch). Replies still reach it after this round."
+      bannerEl.hidden = false
+    } else {
+      bannerEl.hidden = true
+    }
   }
 
   function renderThreads() {
@@ -107,7 +163,6 @@ const clientScript = `(function () {
     state.version = version
     versionSelect.value = version
     frame.src = "/a/" + data.artifactId + "/" + version + "/index.html"
-    render()
   }
 
   function headChips(thread) {
@@ -123,14 +178,27 @@ const clientScript = `(function () {
     }
     if (thread.status === "resolved") {
       wrap.appendChild(el("span", "chip resolved-chip", "resolved in " + (thread.resolvedInVersion || "earlier version")))
-      wrap.appendChild(el("span", "chevron", state.expanded[thread.id] ? "\u25be" : "\u25b8"))
+      wrap.appendChild(el("span", "chevron", state.expanded[thread.id] ? "\\u25be" : "\\u25b8"))
     }
     return wrap
+  }
+
+  function messageRow(message) {
+    var row = el("div", "message")
+    row.appendChild(el("span", "author " + message.author, message.author))
+    if (message.kind === "thinking") {
+      row.appendChild(el("span", "spinner"))
+      row.appendChild(el("span", "body thinking-text", "thinking\\u2026"))
+    } else {
+      row.appendChild(el("span", "body", message.body))
+    }
+    return row
   }
 
   function threadCard(thread, number) {
     var resolved = thread.status === "resolved"
     var collapsed = resolved && !state.expanded[thread.id]
+    var review = state.status === "review"
     var card = el("div", "thread" + (resolved ? " resolved" : "") + (collapsed ? " collapsed" : ""))
     card.dataset.threadId = thread.id
     var head = el("div", "thread-head")
@@ -139,12 +207,7 @@ const clientScript = `(function () {
     head.appendChild(headChips(thread))
     card.appendChild(head)
     var body = el("div", "thread-body")
-    thread.messages.forEach(function (message) {
-      var row = el("div", "message")
-      row.appendChild(el("span", "author " + message.author, message.author))
-      row.appendChild(el("span", "body", message.body))
-      body.appendChild(row)
-    })
+    thread.messages.forEach(function (message) { body.appendChild(messageRow(message)) })
     var actions = el("div", "thread-actions")
     var replyInput = document.createElement("input")
     replyInput.type = "text"
@@ -153,17 +216,19 @@ const clientScript = `(function () {
     actions.appendChild(replyInput)
     var replyBtn = el("button", "small", "Reply")
     replyBtn.addEventListener("click", function () {
-      var body = replyInput.value.trim()
-      if (!body) return
-      api("/artifacts/" + data.artifactId + "/threads/" + thread.id + "/messages", jsonMethod("POST", { body: body, author: "user" })).then(refresh)
+      var text = replyInput.value.trim()
+      if (!text) return
+      api("/artifacts/" + data.artifactId + "/threads/" + thread.id + "/messages", jsonMethod("POST", { body: text, author: "user" })).then(refresh)
     })
     actions.appendChild(replyBtn)
-    var toggleBtn = el("button", "small", thread.status === "open" ? "Resolve" : "Reopen")
-    toggleBtn.addEventListener("click", function () {
-      var next = thread.status === "open" ? "resolved" : "open"
-      api("/artifacts/" + data.artifactId + "/threads/" + thread.id, jsonMethod("PATCH", { status: next })).then(refresh)
-    })
-    actions.appendChild(toggleBtn)
+    if (review) {
+      var toggleBtn = el("button", "small", thread.status === "open" ? "Resolve" : "Reopen")
+      toggleBtn.addEventListener("click", function () {
+        var next = thread.status === "open" ? "resolved" : "open"
+        api("/artifacts/" + data.artifactId + "/threads/" + thread.id, jsonMethod("PATCH", { status: next })).then(refresh)
+      })
+      actions.appendChild(toggleBtn)
+    }
     body.appendChild(actions)
     card.appendChild(body)
     head.addEventListener("click", function () {
@@ -259,7 +324,7 @@ const clientScript = `(function () {
     pinBtn.textContent = enabled ? "Click an element..." : "+ Comment"
   }
 
-  pinBtn.addEventListener("click", function () { setPinMode(!state.pinMode) })
+  pinBtn.addEventListener("click", function () { if (!pinBtn.disabled) setPinMode(!state.pinMode) })
 
   overlay.addEventListener("click", function (event) {
     if (!state.pinMode) return
@@ -284,7 +349,7 @@ const clientScript = `(function () {
     openComposer(anchor, anchor.text ? "on: " + anchor.text : "on: " + anchor.selector)
   })
 
-  document.getElementById("general-btn").addEventListener("click", function () {
+  generalBtn.addEventListener("click", function () {
     openComposer(null, "general comment (not pinned to an element)")
   })
 
@@ -304,25 +369,44 @@ const clientScript = `(function () {
     })
   })
 
+  iterateBtn.addEventListener("click", function () {
+    if (iterateBtn.disabled) return
+    iterateBtn.disabled = true
+    api("/artifacts/" + data.artifactId + "/iterations", jsonMethod("POST", {})).then(function () {
+      state.followCurrent = true
+      refresh()
+    })
+  })
+
   approveBtn.addEventListener("click", function () {
-    var next = state.artifactStatus === "approved" ? "review" : "approved"
-    api("/artifacts/" + data.artifactId, jsonMethod("PATCH", { status: next })).then(refresh)
+    if (approveBtn.disabled) return
+    api("/artifacts/" + data.artifactId + "/versions/" + state.current + "/approve", jsonMethod("POST", {})).then(refresh)
   })
 
   function initVersionSelect() {
+    var sig = JSON.stringify(state.versions.map(function (entry) {
+      return [entry.version, entry.note || "", entry.approvedAt || "", entry.publishedAt || ""]
+    }))
+    if (sig === state.selectSnapshot) return
+    state.selectSnapshot = sig
     versionSelect.textContent = ""
-    data.versions.forEach(function (entry) {
+    state.versions.forEach(function (entry) {
       var option = document.createElement("option")
       option.value = entry.version
-      option.textContent = entry.version + (entry.note ? " \\u00b7 " + entry.note : "")
+      var bits = [entry.version]
+      if (entry.note) bits.push(entry.note)
+      if (entry.approvedAt) bits.push("approved")
+      if (entry.batch && !entry.publishedAt) bits.push("awaiting agent")
+      option.textContent = bits.join(" \\u00b7 ")
       if (entry.version === state.version) option.selected = true
       versionSelect.appendChild(option)
     })
   }
 
   versionSelect.addEventListener("change", function () {
-    // The dropdown only switches which version the preview shows. The thread
-    // list is artifact-scoped and never changes with it.
+    // Manual switches stop auto-follow: the user chose to read an older
+    // version and should not be yanked forward on publish.
+    state.followCurrent = false
     state.version = versionSelect.value
     frame.src = "/a/" + data.artifactId + "/" + state.version + "/index.html"
     render()
@@ -342,16 +426,27 @@ const clientScript = `(function () {
   setInterval(function () {
     if (!composerEl.hidden) return
     api(feedbackUrl()).then(function (view) {
-      var snapshot = JSON.stringify([view.artifactStatus, view.threads])
+      var snapshot = JSON.stringify([
+        view.artifactStatus,
+        view.current,
+        view.agentAttached,
+        view.threads,
+        view.versions
+      ])
       if (snapshot === state.snapshot) return
       state.snapshot = snapshot
       state.threads = view.threads
-      state.artifactStatus = view.artifactStatus
+      state.status = view.artifactStatus
+      state.attached = view.agentAttached === true
+      state.current = view.current
+      state.versions = view.versions
+      if (state.followCurrent && state.status === "review" && state.current !== state.version) {
+        switchPreview(state.current)
+      }
       render()
     })
   }, 5000)
 
-  initVersionSelect()
   frame.src = "/a/" + data.artifactId + "/" + state.version + "/index.html"
   refresh()
 })()
@@ -363,16 +458,28 @@ const shellStyle = `
   body { margin: 0; font: 14px/1.45 system-ui, -apple-system, sans-serif; background: #0f1115; color: #e6e8ee; height: 100vh; display: flex; flex-direction: column }
   header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid #262b36; background: #14171e }
   .brand { color: #e5484d; font-weight: 700; text-decoration: none }
-  #title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34vw }
+  #title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 28vw }
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; white-space: nowrap }
-  .pill.approved { color: #46d68c; border-color: #2a5c40; background: rgba(70, 214, 140, .08) }
   .pill.review { color: #f5a524; border-color: #6b5320; background: rgba(245, 165, 36, .08) }
+  .pill.iterating { color: #f5a524; border-color: #6b5320; background: rgba(245, 165, 36, .08) }
   .pill.draft { color: #9aa3b2; border-color: #3a4152; background: rgba(154, 163, 178, .08) }
+  .presence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid #3a4152; border-radius: 999px; padding: 2px 10px; color: #9aa3b2; white-space: nowrap }
+  .presence .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7487 }
+  .presence.on { color: #46d68c; border-color: #2a5c40 }
+  .presence.on .dot { background: #46d68c }
+  .presence.working { color: #f5a524; border-color: #6b5320 }
+  .presence.working .dot { background: #f5a524; animation: pulse 1s ease-in-out infinite }
+  @keyframes pulse { 50% { opacity: .35 } }
   button { background: #1d2230; color: #e6e8ee; border: 1px solid #333b4d; border-radius: 6px; padding: 6px 12px; cursor: pointer; font: inherit }
   button:hover { border-color: #4c5878 }
   button.active { background: #e5484d; border-color: #e5484d; color: #fff }
+  button[disabled] { opacity: .4; cursor: not-allowed }
+  #iterate { background: #e5484d; border-color: #e5484d; color: #fff; font-weight: 600 }
+  #iterate[disabled] { background: #1d2230; border-color: #333b4d; color: #9aa3b2 }
   #approve { border-color: #2a5c40; color: #46d68c }
   .spacer { flex: 1 }
+  #banner { border-bottom: 1px solid #6b5320; background: rgba(245, 165, 36, .08); color: #f5a524; padding: 6px 14px; font-size: 13px }
+  #banner[hidden] { display: none }
   main { flex: 1; display: flex; min-height: 0 }
   #stage { flex: 1; position: relative; background: #fff }
   #frame { width: 100%; height: 100%; border: 0; display: block }
@@ -402,11 +509,15 @@ const shellStyle = `
   .thread.collapsed .thread-body { display: none }
   .badge { background: #e5484d; color: #fff; border-radius: 999px; min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0 }
   .thread-target { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-  .message { display: flex; gap: 8px; font-size: 13px }
+  .message { display: flex; gap: 8px; font-size: 13px; align-items: baseline }
+  .message .spinner { align-self: center }
   .author { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid; height: fit-content; flex-shrink: 0 }
   .author.user { color: #8ab4ff; border-color: #34437a }
   .author.agent { color: #46d68c; border-color: #2a5c40 }
   .body { white-space: pre-wrap; word-break: break-word }
+  .thinking-text { color: #6b7487; font-style: italic }
+  .spinner { width: 12px; height: 12px; border: 2px solid #333b4d; border-top-color: #46d68c; border-radius: 50%; animation: spin .8s linear infinite; flex-shrink: 0 }
+  @keyframes spin { to { transform: rotate(360deg) } }
   .thread-actions { display: flex; gap: 6px; margin-top: 2px }
   .reply { flex: 1; background: #0f1115; border: 1px solid #333b4d; border-radius: 6px; color: #e6e8ee; padding: 5px 8px; font: inherit; min-width: 0 }
   button.small { padding: 4px 8px; font-size: 12px }
@@ -433,12 +544,15 @@ export const renderShellPage = (data: ShellData): string => {
   <a class="brand" href="/">redline</a>
   <span id="title">${title}</span>
   <span id="status" class="pill review">in review</span>
+  <span id="presence" class="presence off"><span class="dot"></span><span id="presence-label">checking&hellip;</span></span>
   <label>Version <select id="version"></select></label>
   <span class="spacer"></span>
   <button id="general-btn">General</button>
   <button id="pin-mode">+ Comment</button>
+  <button id="iterate">Iterate</button>
   <button id="approve">Approve</button>
 </header>
+<div id="banner" hidden></div>
 <main>
   <section id="stage">
     <iframe id="frame" title="artifact"></iframe>
@@ -446,7 +560,7 @@ export const renderShellPage = (data: ShellData): string => {
   </section>
   <aside id="sidebar">
     ${data.prompt.length > 0 ? '<details class="brief"><summary>Brief</summary><p>' + escapeHtml(data.prompt) + "</p></details>" : ""}
-    <div class="hint">Click <b>+ Comment</b>, then click any element: headings, paragraphs, diagrams, tables, embedded UI. Feedback saves immediately and the agent picks it up. Click <b>Approve</b> when you are done.</div>
+    <div class="hint">Comment on anything &mdash; the agent answers live in the thread. Hit <b>Iterate</b> to send the batch: the agent rewrites the artifact and publishes the next version. <b>Approve</b> just means done for now.</div>
     <div id="composer" hidden>
       <div id="composer-target"></div>
       <textarea id="composer-body" placeholder="What should change?"></textarea>

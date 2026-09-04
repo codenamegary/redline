@@ -14,10 +14,10 @@ export type GalleryItem = {
 }
 
 const pillClass = (status: string): string =>
-  status === "approved" ? "pill approved" : status === "review" ? "pill review" : "pill draft"
+  status === "iterating" ? "pill iterating" : status === "review" ? "pill review" : "pill draft"
 
 const pillLabel = (status: string): string =>
-  status === "approved" ? "approved" : status === "review" ? "in review" : "draft"
+  status === "iterating" ? "iterating" : status === "review" ? "in review" : "draft"
 
 const shortDate = (isoTimestamp: string): string => isoTimestamp.slice(0, 16).replace("T", " ")
 
@@ -78,8 +78,8 @@ export const renderGalleryPage = (items: GalleryItem[], home: string): string =>
   .card-links a { color: #8ab4ff; text-decoration: none; font-size: 13px }
   .card-links a:hover { text-decoration: underline }
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; white-space: nowrap }
-  .pill.approved { color: #46d68c; border-color: #2a5c40; background: rgba(70, 214, 140, .08) }
   .pill.review { color: #f5a524; border-color: #6b5320; background: rgba(245, 165, 36, .08) }
+  .pill.iterating { color: #46d68c; border-color: #2a5c40; background: rgba(70, 214, 140, .08) }
   .pill.draft { color: #9aa3b2; border-color: #3a4152; background: rgba(154, 163, 178, .08) }
   .open-count { color: #f5a524 }
   .empty { color: #9aa3b2 }

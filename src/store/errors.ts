@@ -1,4 +1,4 @@
-export type StoreErrorKind = "not-found" | "conflict"
+export type StoreErrorKind = "not-found" | "conflict" | "unprocessable"
 
 export type StoreError = Error & { kind: StoreErrorKind }
 

@@ -4,18 +4,20 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
-  addArtifactVersion,
+  approveVersion,
   appendThread,
   appendThreadMessage,
   countOpenThreads,
   createArtifact,
   listArtifacts,
   openStore,
+  publishIteration,
   readArtifactMeta,
   readFeedbackDoc,
   readFeedbackView,
-  setArtifactStatus,
+  replaceThinkingMessage,
   setThreadStatus,
+  startIteration,
   Store,
 } from "./artifact.store"
 import { isStoreError } from "./errors"
@@ -29,7 +31,7 @@ const makeStore = (): Store => {
 }
 
 describe("artifact store", () => {
-  it("creates an artifact with v1 file and review status", async () => {
+  it("creates an artifact with a published v1 and review status", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, {
       title: "Dashboard redesign",
@@ -39,6 +41,8 @@ describe("artifact store", () => {
     expect(meta.status).toBe("review")
     expect(meta.current).toBe("v1")
     expect(meta.versions).toHaveLength(1)
+    expect(meta.versions[0]?.publishedAt).toBeDefined()
+    expect(meta.versions[0]?.batch).toBeUndefined()
     expect(meta.title).toBe("Dashboard redesign")
     expect(meta.prompt).toBe("a metrics dashboard")
     const html = readFileSync(join(store.artifactsDir, meta.id, "v1", "index.html"), "utf8")
@@ -59,16 +63,62 @@ describe("artifact store", () => {
     expect(second.id).toMatch(/-my-mock-v2-2$/)
   })
 
-  it("adds versions and moves current forward", async () => {
+  it("runs the iteration loop: freeze batch, publish, back to review", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Deck", prompt: "", html: "<p>v1</p>" })
-    const updated = await addArtifactVersion(store, meta.id, { html: "<p>v2</p>", note: "second pass" })
-    expect(updated.current).toBe("v2")
-    expect(updated.status).toBe("review")
-    expect(updated.versions).toHaveLength(2)
-    expect(updated.versions[1]?.note).toBe("second pass")
+    const thread = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor: null,
+      body: "make it pop",
+      author: "user",
+    })
+    const { meta: iterating, version } = await startIteration(store, meta.id)
+    expect(iterating.status).toBe("iterating")
+    expect(iterating.iteratedAt).toBeDefined()
+    expect(version.version).toBe("v2")
+    expect(version.publishedAt).toBeUndefined()
+    expect(version.batch?.threadIds).toEqual([thread.id])
+    expect(iterating.current).toBe("v1")
+
+    const doubleIterate = startIteration(store, meta.id)
+    expect(doubleIterate).rejects.toMatchObject({ kind: "conflict" })
+
+    const published = await publishIteration(store, meta.id, { html: "<p>v2</p>", note: "second pass" })
+    expect(published.status).toBe("review")
+    expect(published.current).toBe("v2")
+    expect(published.versions).toHaveLength(2)
+    expect(published.versions[1]?.note).toBe("second pass")
+    expect(published.versions[1]?.publishedAt).toBeDefined()
+    expect(published.versions[1]?.batch?.threadIds).toEqual([thread.id])
     expect(readFileSync(join(store.artifactsDir, meta.id, "v1", "index.html"), "utf8")).toBe("<p>v1</p>")
     expect(readFileSync(join(store.artifactsDir, meta.id, "v2", "index.html"), "utf8")).toBe("<p>v2</p>")
+  })
+
+  it("rejects publishing outside iterating", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>v1</p>" })
+    const early = publishIteration(store, meta.id, { html: "<p>v2</p>" })
+    expect(early).rejects.toMatchObject({ kind: "conflict" })
+  })
+
+  it("stamps approval on the current version only, and never during iterating", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>v1</p>" })
+    await startIteration(store, meta.id)
+    const duringIterating = approveVersion(store, meta.id, "v1")
+    expect(duringIterating).rejects.toMatchObject({ kind: "conflict" })
+    const published = await publishIteration(store, meta.id, { html: "<p>v2</p>" })
+
+    const approved = await approveVersion(store, meta.id, "v2")
+    expect(approved.approvedAt).toBeDefined()
+    expect((await readArtifactMeta(store, meta.id)).status).toBe("review")
+
+    const again = await approveVersion(store, meta.id, "v2")
+    expect(again.approvedAt).toBe(approved.approvedAt)
+
+    const oldVersion = approveVersion(store, meta.id, "v1")
+    expect(oldVersion).rejects.toMatchObject({ kind: "not-found" })
+    expect(published.current).toBe("v2")
   })
 
   it("starts with empty feedback and accumulates threads", async () => {
@@ -89,7 +139,7 @@ describe("artifact store", () => {
     expect(doc.updatedAt).not.toBe("1970-01-01T00:00:00.000Z")
   })
 
-  it("appends messages and toggles thread status", async () => {
+  it("appends text messages and toggles thread status", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
     const thread = await appendThread(store, meta.id, {
@@ -98,23 +148,45 @@ describe("artifact store", () => {
       body: "thoughts",
       author: "user",
     })
+    expect(thread.messages[0]?.kind).toBe("text")
     const replied = await appendThreadMessage(store, meta.id, thread.id, {
       body: "good catch",
       author: "agent",
     })
     expect(replied.messages).toHaveLength(2)
     expect(replied.messages[1]?.author).toBe("agent")
+    expect(replied.messages[1]?.kind).toBe("text")
     const resolved = await setThreadStatus(store, meta.id, thread.id, "resolved")
     expect(resolved.status).toBe("resolved")
     const reopened = await setThreadStatus(store, meta.id, thread.id, "open")
     expect(reopened.status).toBe("open")
   })
 
-  it("sets artifact status", async () => {
+  it("replaces thinking placeholders and nothing else", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
-    const approved = await setArtifactStatus(store, meta.id, "approved")
-    expect(approved.status).toBe("approved")
+    const thread = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor: null,
+      body: "does this scale",
+      author: "user",
+    })
+    const placeholder = await appendThreadMessage(store, meta.id, thread.id, {
+      body: "…",
+      author: "agent",
+      kind: "thinking",
+    })
+    const placeholderId = placeholder.messages[1]?.id
+    expect(placeholder.messages[1]?.kind).toBe("thinking")
+
+    const answered = await replaceThinkingMessage(store, meta.id, thread.id, placeholderId ?? "", "yes, to 10k rows")
+    expect(answered.messages[1]?.kind).toBe("text")
+    expect(answered.messages[1]?.body).toBe("yes, to 10k rows")
+
+    const twice = replaceThinkingMessage(store, meta.id, thread.id, placeholderId ?? "", "again")
+    expect(twice).rejects.toMatchObject({ kind: "not-found" })
+    const userMessage = replaceThinkingMessage(store, meta.id, thread.id, thread.messages[0]?.id ?? "", "nope")
+    expect(userMessage).rejects.toMatchObject({ kind: "not-found" })
   })
 
   it("throws not-found store errors for unknown artifacts and threads", async () => {
@@ -149,13 +221,14 @@ describe("artifact store", () => {
   it("counts open threads across versions", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
-    await addArtifactVersion(store, meta.id, { html: "<p>2</p>" })
     const openThread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
       body: "open on v1",
       author: "user",
     })
+    await startIteration(store, meta.id)
+    await publishIteration(store, meta.id, { html: "<p>2</p>" })
     await appendThread(store, meta.id, {
       version: "v2",
       anchor: null,
@@ -176,13 +249,16 @@ describe("artifact store", () => {
       author: "user",
     })
     expect(thread.anchorVersion).toBe("v1")
-    await addArtifactVersion(store, meta.id, { html: "<p>2</p>" })
+    await startIteration(store, meta.id)
+    await publishIteration(store, meta.id, { html: "<p>2</p>" })
 
     const view = await readFeedbackView(store, meta.id)
     expect(view.version).toBe("v2")
+    expect(view.current).toBe("v2")
+    expect(view.versions).toHaveLength(2)
+    expect(view.iteratedAt).not.toBe("1970-01-01T00:00:00.000Z")
     expect(view.threads).toHaveLength(1)
     expect(view.threads[0]?.anchorVersion).toBe("v1")
-    expect(view.updatedAt).not.toBe("1970-01-01T00:00:00.000Z")
 
     const resolved = await setThreadStatus(store, meta.id, thread.id, "resolved")
     expect(resolved.resolvedInVersion).toBe("v2")
@@ -202,7 +278,7 @@ describe("artifact store", () => {
     expect(missing).rejects.toMatchObject({ kind: "not-found" })
   })
 
-  it("sorts the view open-first and derives anchor versions for legacy threads", async () => {
+  it("sorts the view open-first and derives anchor versions for unpinned threads", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
     const first = await appendThread(store, meta.id, {
@@ -219,7 +295,8 @@ describe("artifact store", () => {
     })
     await setThreadStatus(store, meta.id, first.id, "resolved")
 
-    // Rewrite the first thread as legacy JSON without anchorVersion.
+    // Rewrite the first thread without anchorVersion; the view derives it
+    // from the feedback file name.
     const path = join(store.artifactsDir, meta.id, "feedback", "v1.json")
     const raw = JSON.parse(readFileSync(path, "utf8")) as { threads: Array<{ anchorVersion?: string }> }
     delete raw.threads[0]?.anchorVersion

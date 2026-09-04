@@ -47,17 +47,41 @@ const ThreadSchema = z.object({
     .nullable(),
   anchorVersion: z.string().optional(),
   resolvedInVersion: z.string().optional(),
-  messages: z.array(z.object({ author: z.string(), body: z.string() })),
+  messages: z.array(z.object({ author: z.string(), kind: z.string().optional(), body: z.string() })),
 })
 
 type Thread = z.infer<typeof ThreadSchema>
 
+const VersionRowSchema = z.object({
+  version: z.string(),
+  note: z.string().optional(),
+  publishedAt: z.string().optional(),
+  approvedAt: z.string().optional(),
+  batch: z
+    .object({ threadIds: z.array(z.string()), submittedAt: z.string() })
+    .optional(),
+})
+
+type VersionRow = z.infer<typeof VersionRowSchema>
+
+const epoch = "1970-01-01T00:00:00.000Z"
+
+const maxIso = (values: string[]): string => values.reduce((latest, value) => (value > latest ? value : latest))
+
+const pendingRow = (view: FeedbackView): VersionRow | undefined =>
+  view.versions.find((row) => row.batch !== undefined && row.publishedAt === undefined)
+
 const FeedbackViewSchema = z.object({
   version: z.string(),
+  current: z.string(),
   updatedAt: z.string(),
+  iteratedAt: z.string(),
   threads: z.array(ThreadSchema),
   artifactStatus: z.string(),
   artifactUpdatedAt: z.string(),
+  approvedAt: z.string().optional(),
+  agentAttached: z.boolean().optional(),
+  versions: z.array(VersionRowSchema),
 })
 
 type FeedbackView = z.infer<typeof FeedbackViewSchema>
@@ -204,6 +228,7 @@ const renderThreads = (view: FeedbackView): string => {
         thread.messages.length > 1
           ? " (+" + String(thread.messages.length - 1) + " earlier message(s))"
           : ""
+      const thinking = last?.kind === "thinking" ? " [agent thinking \u2014 replace this placeholder]" : ""
       const tags: string[] = []
       if (thread.anchorVersion !== undefined) tags.push("pinned on " + thread.anchorVersion)
       if (thread.status === "resolved" && thread.resolvedInVersion !== undefined) {
@@ -211,10 +236,53 @@ const renderThreads = (view: FeedbackView): string => {
       }
       const tagText = tags.length > 0 ? " (" + tags.join(", ") + ")" : ""
       return (
-        String(index + 1) + ". [" + thread.status + "]" + tagText + " " + target + ": " + (last?.body ?? "") + extra
+        String(index + 1) +
+        ". [" +
+        thread.status +
+        "]" +
+        tagText +
+        " " +
+        target +
+        ": " +
+        (last?.body ?? "") +
+        thinking +
+        extra
       )
     })
     .join("\n")
+}
+
+const workDutyText = (view: FeedbackView, artifactId: string): string => {
+  const pending = pendingRow(view)
+  const count = pending?.batch?.threadIds.length ?? 0
+  return (
+    "WORK DUTY on " +
+    artifactId +
+    ": iteration " +
+    (pending?.version ?? view.current) +
+    " was submitted with " +
+    String(count) +
+    " thread(s) in the frozen batch:\n" +
+    renderThreads(view) +
+    "\nAddress the batch, then publish with update_artifact (note = what changed). Publishing returns the artifact to review. Meanwhile you may reply in threads."
+  )
+}
+
+const replyDutyText = (view: FeedbackView, artifactId: string): string => {
+  const open = view.threads.filter((thread: Thread) => thread.status === "open").length
+  return (
+    "REPLY DUTY on " +
+    artifactId +
+    " (" +
+    view.current +
+    ", status " +
+    view.artifactStatus +
+    ", " +
+    String(open) +
+    " open):\n" +
+    renderThreads(view) +
+    "\nConversation only: replace thinking placeholders via PATCH or post replies. update_artifact is rejected (409) until the user hits Iterate."
+  )
 }
 
 const jsonInit = (method: string, body: unknown): RequestInit => ({
@@ -265,7 +333,7 @@ export default function (pi: ExtensionAPI): void {
       const text = [
         "Artifact created: " + summary.id + " (" + summary.current + ")",
         "Review URL: " + summary.reviewUrl,
-        "Give this URL to the user, then call wait_for_feedback to block until they comment or approve.",
+        "Give this URL to the user, then call wait_for_feedback: comments wake you for replies only, the user's Iterate submits a batch for you to publish, approval means done for now.",
       ].join("\n")
       return { content: [{ type: "text", text: text }], details: summary }
     },
@@ -275,8 +343,8 @@ export default function (pi: ExtensionAPI): void {
     name: "update_artifact",
     label: "Update artifact",
     description:
-      "Publish a revised version of a redline artifact. The new version becomes current and the artifact returns to review status. Keep section ids stable so existing pins still resolve.",
-    promptSnippet: "Publish a revised version of a redline artifact",
+      "Publish the pending iteration of a redline artifact as a new version. Only legal while the artifact is iterating (the user hit Iterate); publishing stamps the version and returns the artifact to review. Keep section ids stable so existing pins still resolve.",
+    promptSnippet: "Publish the pending iteration of a redline artifact",
     parameters: Type.Object({
       artifactId: Type.String({ description: "Artifact id from create_artifact" }),
       html: Type.String({ description: "Complete revised HTML document" }),
@@ -297,7 +365,9 @@ export default function (pi: ExtensionAPI): void {
         summary.current +
         " of " +
         summary.id +
-        ". Review URL: " +
+        " (iteration complete, status " +
+        summary.status +
+        "). Review URL: " +
         summary.reviewUrl +
         ". Call wait_for_feedback next."
       return { content: [{ type: "text", text: text }], details: summary }
@@ -308,7 +378,7 @@ export default function (pi: ExtensionAPI): void {
     name: "get_feedback",
     label: "Get feedback",
     description:
-      "Read the comment threads and approval status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, and the conversation.",
+      "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
     promptSnippet: "Read current redline feedback for an artifact",
     parameters: Type.Object({
       artifactId: Type.String({ description: "Artifact id" }),
@@ -324,18 +394,27 @@ export default function (pi: ExtensionAPI): void {
         "/api/v1/artifacts/" + encodeURIComponent(params.artifactId) + "/feedback" + query,
       )
       const view = FeedbackViewSchema.parse(body)
-      const text =
+      const openCount = view.threads.filter((thread: Thread) => thread.status === "open").length
+      const pending = pendingRow(view)
+      const header =
         "Artifact " +
         params.artifactId +
         " " +
-        view.version +
+        view.current +
         ", status: " +
         view.artifactStatus +
+        ", agent: " +
+        (view.agentAttached ? "attached" : "not attached") +
         " (" +
-        String(view.threads.filter((thread: Thread) => thread.status === "open").length) +
-        " open)" +
-        "\n" +
-        renderThreads(view)
+        String(openCount) +
+        " open)"
+      const pendingLine =
+        pending !== undefined
+          ? "\nPending iteration " + pending.version + " with " + String(pending.batch?.threadIds.length ?? 0) + " thread(s) \u2014 address the batch and publish with update_artifact."
+          : view.approvedAt !== undefined
+            ? "\n" + view.current + " approved \u2014 done for now."
+            : ""
+      const text = header + pendingLine + "\n" + renderThreads(view)
       return { content: [{ type: "text", text: text }], details: view }
     },
   })
@@ -344,8 +423,8 @@ export default function (pi: ExtensionAPI): void {
     name: "wait_for_feedback",
     label: "Wait for feedback",
     description:
-      "Block until the user leaves new feedback or approves the artifact, or until the timeout. This is how a review round ends. Esc cancels the wait.",
-    promptSnippet: "Block until the user comments on or approves a redline artifact",
+      "Block until the user comments (reply duty: answer in threads, never publish), hits Iterate (work duty: address the frozen batch and publish), or approves the current version (exit: done for now, hand control back). Esc cancels the wait.",
+    promptSnippet: "Block until the user comments, iterates, or approves a redline artifact",
     parameters: Type.Object({
       artifactId: Type.String({ description: "Artifact id" }),
       timeoutSeconds: Type.Optional(
@@ -354,7 +433,7 @@ export default function (pi: ExtensionAPI): void {
       after: Type.Optional(
         Type.String({
           description:
-            "ISO timestamp; wake only for changes after it. By default any open threads return immediately, otherwise the call blocks from now.",
+            "ISO timestamp; wake only for changes after it. By default open threads or a pending iteration return immediately, otherwise the call blocks from now.",
         }),
       ),
     }),
@@ -375,6 +454,11 @@ export default function (pi: ExtensionAPI): void {
       })
       try {
         const initial = FeedbackViewSchema.parse(await requestJson(base, artifactPath, { signal: signal }))
+        // An iteration in flight is always work, whatever else happened.
+        if (initial.artifactStatus === "iterating" || pendingRow(initial) !== undefined) {
+          const text = workDutyText(initial, params.artifactId)
+          return { content: [{ type: "text", text: text }], details: initial }
+        }
         if (params.after === undefined) {
           const openCount = initial.threads.filter((thread: Thread) => thread.status === "open").length
           if (openCount > 0) {
@@ -382,7 +466,7 @@ export default function (pi: ExtensionAPI): void {
               "Feedback already waiting on " +
               params.artifactId +
               " (" +
-              initial.version +
+              initial.current +
               ", status: " +
               initial.artifactStatus +
               "):\n" +
@@ -392,9 +476,12 @@ export default function (pi: ExtensionAPI): void {
         }
         const after =
           params.after ??
-          (initial.updatedAt > initial.artifactUpdatedAt
-            ? initial.updatedAt
-            : initial.artifactUpdatedAt)
+          maxIso([
+            initial.updatedAt,
+            initial.artifactUpdatedAt,
+            initial.iteratedAt,
+            initial.approvedAt ?? epoch,
+          ])
         const body = await requestJson(
           base,
           artifactPath +
@@ -405,16 +492,22 @@ export default function (pi: ExtensionAPI): void {
           { signal: signal },
         )
         const view = FeedbackViewSchema.parse(body)
+        if (view.artifactStatus === "iterating" || pendingRow(view) !== undefined) {
+          const text = workDutyText(view, params.artifactId)
+          return { content: [{ type: "text", text: text }], details: view }
+        }
+        if (view.approvedAt !== undefined && view.approvedAt > after) {
+          const text =
+            "EXIT on " +
+            params.artifactId +
+            ": " +
+            view.current +
+            " approved \u2014 done for now. Report the sign-off and hand control back to the user. The artifact stays open: a later Iterate re-attaches you."
+          return { content: [{ type: "text", text: text }], details: view }
+        }
         const changed = view.updatedAt > after || view.artifactUpdatedAt > after
         const text = changed
-          ? "New activity on " +
-            params.artifactId +
-            " (" +
-            view.version +
-            ", status: " +
-            view.artifactStatus +
-            "):\n" +
-            renderThreads(view)
+          ? replyDutyText(view, params.artifactId)
           : "No new feedback within " +
             String(timeoutSeconds) +
             "s. Status is still " +

@@ -12,7 +12,7 @@ You could screenshot it into Slack and type *"the box near the middle, second fr
 
 **Or you could redline it.** ✨
 
-redline is a local review server for *anything your agent can render*: 🖥️ UI mockups, 🏗️ architecture docs, 📋 decision records, 📜 API contracts, 🔀 data flows, 📊 diagrams, 💡 concepts, 🗺️ plans, 🚀 that idea you had in the shower. Your agent publishes an artifact, you pin comments on the exact elements that bother you — headings, diagrams, tables, buttons, embedded UI — and the agent reads your structured feedback back over a tiny HTTP API, revises, and does it all again until you hit **Approve**.
+redline is a local review server for *anything your agent can render*: 🖥️ UI mockups, 🏗️ architecture docs, 📋 decision records, 📜 API contracts, 🔀 data flows, 📊 diagrams, 💡 concepts, 🗺️ plans, 🚀 that idea you had in the shower. Your agent publishes an artifact, you pin comments on the exact elements that bother you — headings, diagrams, tables, buttons, embedded UI — and your agent answers *live in the thread*. When the batch feels right, you hit **Iterate**: the feedback freezes, the agent folds it all into a new version, and the loop repeats. **Approve** just means *done for now* — the artifact stays open, always iterable. 🔄
 
 Google Docs comments. Figma pins. Except the document is written by your agent, the review loop drives itself, and nothing ever leaves your machine. 🏠
 
@@ -44,13 +44,16 @@ sequenceDiagram
     A->>R: POST /artifacts (rich HTML)
     R->>H: here's a review URL ✨
     H->>R: pins comments on elements
-    A->>R: long-poll (wakes INSTANTLY)
-    A->>R: POST /versions (revision)
+    A->>R: long-poll wakes (reply duty)
+    A->>R: answers in-thread 💬 (never publishes)
+    H->>R: hits Iterate 🔄 (batch freezes)
+    A->>R: long-poll wakes (work duty)
+    A->>R: POST /versions (the batch becomes v2)
     R->>H: v2, fresh and improved
-    Note over A,H: repeat until 🟢 Approved
+    Note over A,H: repeat until 🟢 done for now — never a dead end
 ```
 
-Four verbs. Endless patience. Zero meetings. 🪄
+The agent can talk all it wants, but it cannot publish until you say so — the server 409s any revision outside `iterating`. Conversation and construction, cleanly separated. 🪄
 
 ## ⚡ Quick start
 
@@ -98,11 +101,11 @@ curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.s
 ## 🎁 What you get
 
 - 📌 **Pin comments on anything.** Headings, paragraphs, diagrams, tables, buttons, whole embedded UIs. If HTML can render it, you can redline it — which means *everything*.
-- 💬 **Threads, not sticky notes.** Replies, resolve/reopen, and `author: "user" | "agent"` — so your agent can answer your questions *in the thread* before touching the document. Like a coworker who's suspiciously fast and never sighs.
-- 🕰️ **History is sacred.** Every revision kept. Every thread records the version it was pinned on (`anchorVersion`) and the version that resolved it (`resolvedInVersion`). Old pins stay visible — the UI badges them so nothing gaslights you.
-- ⚡ **Long-polling that actually wakes up.** The agent blocks on `wait`, and the moment you comment or approve, it springs into action. No cron. No refresh spam. No "checking if the agent saw my feedback" anxiety spiral.
+- 💬 **Threads, not sticky notes.** Replies, resolve/reopen, and `author: "user" | "agent"` — so your agent can answer your questions *in the thread* before touching the document. Comment while the agent is attached and it instantly shows a 🌀 *thinking…* placeholder, then its real answer. Like a coworker who's suspiciously fast and never sighs.
+- 🕰️ **History is sacred.** Every revision kept. Every version is the record of one iteration: the batch of threads it addressed, when it was published, when you approved it. Every thread records the version it was pinned on (`anchorVersion`) and the version that resolved it (`resolvedInVersion`). Old pins stay visible — the UI badges them so nothing gaslights you.
+- ⚡ **Long-polling that actually wakes up — with a job attached.** Comment and the agent wakes to chat (reply duty). Hit **Iterate** and it wakes to work (work duty). Approve and it goes home (done for now). The server enforces the split: publishing outside `iterating` is a 409, so live replies are always consequence-free. No cron. No refresh spam. No "checking if the agent saw my feedback" anxiety spiral.
 - 🗂️ **The filesystem is the database.** Plain JSON + HTML under `~/.redline`. No migrations, no volumes, no vendor. `grep` your own feedback. `diff` two versions. Back it up with `cp`. Radical, we know.
-- 🔌 **Any harness, any agent.** Claude Code / Cursor / Antigravity via the skill. Native tools for pi and OpenCode. Or raw HTTP — ten endpoints. `curl` works too.
+- 🔌 **Any harness, any agent.** Claude Code / Cursor / Antigravity via the skill. Native tools for pi and OpenCode. Or raw HTTP — twelve endpoints. `curl` works too.
 - 🏠 **Localhost or nothing.** No cloud. No accounts. No telemetry. No "workspace". Your design docs never leave your disk, which is where your stuff lived before anyone decided it shouldn't.
 
 ## 📁 On disk
@@ -114,7 +117,7 @@ curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.s
 ├── app/                            # self-managed copy of redline (created by install.sh)
 └── artifacts/
     └── 2026-01-15-143205-dashboard/
-        ├── meta.json               # title, prompt, status, versions
+        ├── meta.json               # title, prompt, status, version ledger
         ├── v1/index.html           # self-contained artifact versions
         ├── v2/index.html
         └── feedback/
@@ -132,14 +135,16 @@ Standards: Richardson Level 2, camelCase JSON, ISO 8601 UTC timestamps, RFC 7807
 |--------|------|---------|
 | GET | `/api/v1/health` | liveness + home path |
 | GET | `/api/v1/artifacts` | list summaries (status, versions, open threads, review URL) |
-| POST | `/api/v1/artifacts` | create with `{title, html, prompt?, note?}` → 201 + Location |
-| GET | `/api/v1/artifacts/:id` | detail incl. prompt and version list |
-| PATCH | `/api/v1/artifacts/:id` | `{status}`: `draft`, `review`, or `approved` |
-| POST | `/api/v1/artifacts/:id/versions` | add revision `{html, note?}` → becomes current, status `review` |
-| GET | `/api/v1/artifacts/:id/feedback` | all threads artifact-scoped, open first; `?version=` filters to threads pinned on that version; long-poll `?after=<iso>&wait=<seconds>` (max 300) |
-| POST | `/api/v1/artifacts/:id/feedback` | new thread `{body, anchor?, version?, author?}` |
-| POST | `/api/v1/artifacts/:id/threads/:threadId/messages` | reply `{body, author?}` |
-| PATCH | `/api/v1/artifacts/:id/threads/:threadId` | `{status}`: `open` or `resolved` |
+| POST | `/api/v1/artifacts` | create with `{title, html, prompt?, note?}` → 201 + Location, status `review` |
+| GET | `/api/v1/artifacts/:id` | detail incl. prompt, `iteratedAt`, and the version ledger |
+| POST | `/api/v1/artifacts/:id/iterations` | hit Iterate: freezes open threads into a pending version, status `iterating` (409 unless `review`, 422 with nothing open) |
+| POST | `/api/v1/artifacts/:id/versions` | publish the pending iteration `{html, note?}` → becomes current, status `review` (409 unless `iterating`) |
+| POST | `/api/v1/artifacts/:id/versions/:version/approve` | done for now: stamps `approvedAt` on the current version (409 while iterating) |
+| GET | `/api/v1/artifacts/:id/feedback` | all threads artifact-scoped, open first, plus `agentAttached`, `iteratedAt`, `approvedAt`, version ledger; `?version=` filters to threads pinned on that version; long-poll `?after=<iso>&wait=<seconds>` (max 300) |
+| POST | `/api/v1/artifacts/:id/feedback` | new thread `{body, anchor?, version?, author?}` — 409 while iterating |
+| POST | `/api/v1/artifacts/:id/threads/:threadId/messages` | reply `{body, author?}` — always allowed; user replies while the agent is attached get a `thinking` placeholder |
+| PATCH | `/api/v1/artifacts/:id/threads/:threadId/messages/:messageId` | replace a `thinking` placeholder with the real reply |
+| PATCH | `/api/v1/artifacts/:id/threads/:threadId` | `{status}`: `open` or `resolved` — 409 while iterating |
 
 Pages (not part of the JSON API):
 
@@ -149,14 +154,15 @@ Pages (not part of the JSON API):
 | `/a/:id` | review shell (feedback sidebar + iframe) |
 | `/a/:id/:version/*` | raw artifact files; `current` resolves to the latest version |
 
-Threads are artifact-scoped even though they're stored per version — open threads surface first no matter which version they were pinned on, and `?version=vN` filters to a specific version's pins. Artifacts should be single-file HTML: inline CSS and JS, no network dependencies, stable `id` attributes on major sections so pins survive revisions. The skill teaches your agent all of this, so ideally you never have to think about it. 😌
+Threads are artifact-scoped even though they're stored per version — open threads surface first no matter which version they were pinned on, and `?version=vN` filters to a specific version's pins. Messages carry a `kind`: `text`, or `thinking` — the server-synthesized placeholder the agent replaces with its real answer (the only editable message). The loop's statuses are server-owned: `draft`, `review`, `iterating`. Approval is not one of them — it's an `approvedAt` stamp on a version row, alongside the frozen `batch` of thread ids that iteration addressed. Artifacts should be single-file HTML: inline CSS and JS, no network dependencies, stable `id` attributes on major sections so pins survive revisions. The skill teaches your agent all of this, so ideally you never have to think about it. 😌
 
 ## 🧭 Principles
 
 - **Feedback should be structured.** Anchors with selectors, not screenshots with arrows drawn on them. Machine-readable critique that agents can actually act on.
-- **The review loop drives itself.** Agent publishes → you annotate → agent wakes → agent revises → repeat → Approve. You do judgment; the agent does everything else. Division of labor! 💼
-- **Nothing disappears.** Versions are immutable, threads are anchored, resolutions are stamped. Your review history is a first-class artifact.
-- **Zero ceremony.** No sign-up, no API keys, no seat count, no onboarding webinar. It's a local server with ten endpoints. It starts when you need it and shuts up when you don't. 🤫
+- **The review loop drives itself.** You annotate → the agent answers → you hit Iterate → the agent publishes the batch as a version → repeat. You do judgment; the agent does everything else. Division of labor! 💼
+- **Conversation and construction are different jobs.** Comments wake the agent to talk; only Iterate wakes it to work. The server makes the rule, so nobody has to remember it.
+- **Nothing disappears.** Versions are immutable, threads are anchored, resolutions are stamped, approvals live on the version that earned them. Your review history is a first-class artifact.
+- **Zero ceremony.** No sign-up, no API keys, no seat count, no onboarding webinar. It's a local server with twelve endpoints. It starts when you need it and shuts up when you don't. 🤫
 
 ## 🛠️ Development
 

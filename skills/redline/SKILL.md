@@ -5,7 +5,17 @@ description: Create and iterate on rich HTML design artifacts (architecture docs
 
 # Redline: design artifact review loop
 
-redline serves HTML artifacts in a browser shell where the user pins comments on any element and approves. You create, wait, revise, repeat. Everything lives under `~/.redline`; the server exposes it over HTTP.
+redline serves HTML artifacts in a browser shell where the user pins comments, talks with you live in the threads, and hits **Iterate** to hand you a frozen batch of feedback. You answer comments immediately (conversation only), then do the real work when Iterate is pressed. Approval is just "done for now" — a stamp on a version, never a dead end. Everything lives under `~/.redline`; the server exposes it over HTTP.
+
+## The loop contract
+
+Two wake reasons, one exit. The server enforces the split (publishing outside iterating is a 409), so stay in your lane:
+
+- **Reply duty** — the user commented. Replace the thread's `thinking` placeholder with a real answer (PATCH), or post a reply. Answer questions, ack requests, say what you will do in the next iteration. Never touch the artifact here.
+- **Work duty** — the user hit Iterate. A batch of open threads is frozen onto a pending version. Address the batch and publish with `update_artifact` (note = what changed). Publishing stamps the version and returns the artifact to review. Replying in threads while you work is fine.
+- **Exit** — the user approved the current version. Report "approved @ vN — done for now" and hand control back. The artifact stays open; a later Iterate re-attaches you.
+
+After two consecutive empty waits, hand control back instead of polling forever. Pending iterations recover automatically: the next `wait_for_feedback` or `get_feedback` surfaces them first.
 
 ## Workflow
 
@@ -20,19 +30,20 @@ redline serves HTML artifacts in a browser shell where the user pins comments on
    - Start with a header: title plus a one-paragraph summary of the decision or idea.
 3. Call `create_artifact` with the full HTML. It returns a review URL.
 4. Give the user the review URL and say what to look at. Then call `wait_for_feedback` (timeoutSeconds up to 300).
-5. When it wakes:
-   - If a thread asks a question you can answer, reply in-thread (POST a message with author `agent`) and keep waiting.
-   - Otherwise revise the full HTML and call `update_artifact` with a `note` summarizing the changes. Address everything actionable in one pass.
-6. Call `wait_for_feedback` again. Loop until `artifactStatus` is `approved` or a wait comes back empty. After two empty waits, hand control back to the user instead of polling forever.
+5. When it wakes, act on the duty in the result:
+   - **Reply duty**: fill every thinking placeholder with a real answer (PATCH each one), keep waiting. A good reply says how you will address it, e.g. "will move the legend below the diagram in the next iteration".
+   - **Work duty**: read the frozen batch, revise the full HTML, call `update_artifact` with a `note` summarizing the changes. Address everything actionable in one pass.
+   - **Exit**: the user approved. Report it and stop.
+6. Loop until an exit or two empty waits.
 
 ## Tools
 
 | Tool | Purpose |
 |------|---------|
 | `create_artifact` | `{title, html, prompt?, note?}` returns the review URL |
-| `update_artifact` | `{artifactId, html, note?}` publishes the next version, status returns to review |
-| `get_feedback` | `{artifactId, version?}` threads and status right now |
-| `wait_for_feedback` | `{artifactId, timeoutSeconds?, after?}` blocks until comments, approval, or timeout |
+| `update_artifact` | `{artifactId, html, note?}` publishes the pending iteration (409 unless iterating), status returns to review |
+| `get_feedback` | `{artifactId, version?}` threads, presence, pending iteration, right now |
+| `wait_for_feedback` | `{artifactId, timeoutSeconds?, after?}` blocks until reply duty, work duty, exit, or timeout |
 | `list_artifacts` | all artifacts with open thread counts |
 
 ## Bootstrap (server not running yet)
@@ -65,23 +76,25 @@ The server speaks plain HTTP. Discover it from `~/.redline/server.json` (host an
 # create
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts -H 'content-type: application/json' \
   -d '{"title":"...","html":"<h1>...</h1>"}'
-# read or wait for feedback
+# read or wait for feedback (wakes on comments, Iterate, and approve)
 curl -s "http://127.0.0.1:4739/api/v1/artifacts/<id>/feedback?wait=120&after=<iso-timestamp>"
-# reply to a thread as the agent
+# answer a thinking placeholder (the only editable message kind)
+curl -s -X PATCH http://127.0.0.1:4739/api/v1/artifacts/<id>/threads/<threadId>/messages/<messageId> \
+  -H 'content-type: application/json' -d '{"body":"will move the legend below the diagram in v3"}'
+# post an extra reply as the agent
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/threads/<threadId>/messages \
   -H 'content-type: application/json' -d '{"body":"...","author":"agent"}'
-# publish a revision
+# publish the pending iteration (409 unless the user hit Iterate)
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/versions -H 'content-type: application/json' \
   -d '{"html":"...","note":"what changed"}'
-# status: draft, review, approved
-curl -s -X PATCH http://127.0.0.1:4739/api/v1/artifacts/<id> -H 'content-type: application/json' \
-  -d '{"status":"review"}'
 ```
 
 Feedback is also plain JSON on disk at `~/.redline/artifacts/<id>/feedback/v<N>.json`, readable with the `read` tool. Per-version files are the storage of record; the HTTP view merges them.
 
 ## Feedback shape
 
-Each thread has `id`, `status` (`open` or `resolved`), `anchor` (`selector`, `text`, `rect`; `null` for general comments), `anchorVersion` (the version the thread was pinned on), `resolvedInVersion` (the version that was current when it was resolved; absent while open), and `messages` (`author`: `user` or `agent`, `body`, `createdAt`).
+Each thread has `id`, `status` (`open` or `resolved`), `anchor` (`selector`, `text`, `rect`; `null` for general comments), `anchorVersion` (the version the thread was pinned on), `resolvedInVersion` (the version that was current when it was resolved; absent while open), and `messages` (`author`: `user` or `agent`, `kind`: `text` or `thinking`, `body`, `createdAt`). A `thinking` message is a server-synthesized placeholder (shown with a spinner in the UI) waiting for your PATCH. Regular messages are immutable.
 
-Threads belong to the artifact, not to a version. The default feedback view always returns every thread, open ones first, including threads pinned on older versions. Resolved threads stay readable (collapsed in the review UI, tagged with the version that resolved them). `?version=vN` filters to threads pinned on vN. Resolve threads by fixing the artifact in the next version, not by editing the feedback.
+Threads belong to the artifact, not to a version. The default feedback view always returns every thread, open ones first, including threads pinned on older versions. Resolved threads stay readable (collapsed in the review UI, tagged with the version that resolved them). `?version=vN` filters to threads pinned on vN. The user resolves threads, never you.
+
+The view also carries `current`, `artifactStatus` (`draft`, `review`, `iterating`), `agentAttached` (a `wait_for_feedback` long-poll is in flight), `iteratedAt`, `approvedAt` (when the current version is signed off), and the version ledger — one row per iteration: `version`, `note`, `publishedAt`, `approvedAt`, and `batch` (`threadIds`, `submittedAt`) while it is the frozen work contract. A row with a batch and no `publishedAt` is the pending iteration.

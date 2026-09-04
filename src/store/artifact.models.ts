@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export const artifactStatuses = ["draft", "review", "approved"] as const
+export const artifactStatuses = ["draft", "review", "iterating"] as const
 
 export const ArtifactStatusSchema = z.enum(artifactStatuses)
 
@@ -17,6 +17,12 @@ export const authors = ["user", "agent"] as const
 export const AuthorSchema = z.enum(authors)
 
 export type Author = (typeof authors)[number]
+
+export const messageKinds = ["text", "thinking"] as const
+
+export const MessageKindSchema = z.enum(messageKinds)
+
+export type MessageKind = (typeof messageKinds)[number]
 
 export const versionPattern = /^v\d+$/
 
@@ -46,6 +52,9 @@ export type Anchor = z.infer<typeof AnchorSchema>
 export const ThreadMessageSchema = z.object({
   id: z.string().min(1),
   author: AuthorSchema,
+  // "thinking" marks a server-synthesized placeholder the agent replaces
+  // via PATCH; everything else is an immutable conversation message.
+  kind: MessageKindSchema,
   body: z.string().min(1).max(10000),
   createdAt: IsoTimestampSchema,
 })
@@ -56,9 +65,7 @@ export const ThreadSchema = z.object({
   id: z.string().min(1),
   status: ThreadStatusSchema,
   anchor: AnchorSchema.nullable(),
-  // Version the thread was pinned on. Optional in the schema so legacy
-  // feedback files parse; the store stamps it on write and derives it from
-  // the feedback file name when missing.
+  // Version the thread was pinned on. The store stamps it on write.
   anchorVersion: VersionSchema.optional(),
   // Version that was current when the thread was resolved. Absent while the
   // thread is open.
@@ -77,13 +84,34 @@ export const FeedbackDocSchema = z.object({
 
 export type FeedbackDoc = z.infer<typeof FeedbackDocSchema>
 
+export const VersionBatchSchema = z.object({
+  // Open thread ids frozen when the user hit Iterate. This batch is the
+  // agent's work contract for the version it will publish.
+  threadIds: z.array(z.string().min(1)),
+  submittedAt: IsoTimestampSchema,
+})
+
+export type VersionBatch = z.infer<typeof VersionBatchSchema>
+
 export const ArtifactVersionSchema = z.object({
   version: VersionSchema,
   note: z.string().max(500).optional(),
   createdAt: IsoTimestampSchema,
+  // The version row is born at Iterate (batch set, publishedAt absent) and
+  // completed at publish. v1 is born published.
+  publishedAt: IsoTimestampSchema.optional(),
+  approvedAt: IsoTimestampSchema.optional(),
+  batch: VersionBatchSchema.optional(),
 })
 
 export type ArtifactVersion = z.infer<typeof ArtifactVersionSchema>
+
+// A version row is pending between Iterate and publish.
+export const isPendingVersion = (version: ArtifactVersion): boolean =>
+  version.batch !== undefined && version.publishedAt === undefined
+
+export const pendingVersion = (meta: ArtifactMeta): ArtifactVersion | undefined =>
+  meta.versions.find((version) => isPendingVersion(version))
 
 export const ArtifactIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}$/)
 
@@ -96,6 +124,9 @@ export const ArtifactMetaSchema = z.object({
   status: ArtifactStatusSchema,
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
+  // Last time the user hit Iterate. Separate from updatedAt so waiters can
+  // tell work duty (iteratedAt moved) from reply duty (thread activity).
+  iteratedAt: IsoTimestampSchema.optional(),
   current: VersionSchema,
   versions: z.array(ArtifactVersionSchema).min(1),
 })

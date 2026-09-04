@@ -9,8 +9,11 @@ import { Plugin, tool } from "@opencode-ai/plugin"
 import { z } from "zod"
 
 // opencode plugin for the redline review server. Mirrors src/pi/redline.extension.ts:
-// same five tool names, same HTTP API (see skills/redline/SKILL.md). The server
-// daemon is lazily bootstrapped on first use: the app is found or cloned into
+// same five tool names, same HTTP API (see skills/redline/SKILL.md). The review loop is
+// turn-based: comments wake the agent for replies only; the user's Iterate action
+// freezes open threads into a batch and wakes the agent for work (publishing is
+// 409-gated server-side); approval is a version stamp meaning "done for now". The
+// server daemon is lazily bootstrapped on first use: the app is found or cloned into
 // ~/.redline/app, dependencies are installed via install.sh, and the daemon is
 // started and rediscovered via ~/.redline/server.json.
 
@@ -57,17 +60,41 @@ const ThreadSchema = z.object({
     .nullable(),
   anchorVersion: z.string().optional(),
   resolvedInVersion: z.string().optional(),
-  messages: z.array(z.object({ author: z.string(), body: z.string() })),
+  messages: z.array(z.object({ author: z.string(), kind: z.string().optional(), body: z.string() })),
 })
 
 type Thread = z.infer<typeof ThreadSchema>
 
+const VersionRowSchema = z.object({
+  version: z.string(),
+  note: z.string().optional(),
+  publishedAt: z.string().optional(),
+  approvedAt: z.string().optional(),
+  batch: z
+    .object({ threadIds: z.array(z.string()), submittedAt: z.string() })
+    .optional(),
+})
+
+type VersionRow = z.infer<typeof VersionRowSchema>
+
+const epoch = "1970-01-01T00:00:00.000Z"
+
+const maxIso = (values: string[]): string => values.reduce((latest, value) => (value > latest ? value : latest))
+
+const pendingRow = (view: FeedbackView): VersionRow | undefined =>
+  view.versions.find((row) => row.batch !== undefined && row.publishedAt === undefined)
+
 const FeedbackViewSchema = z.object({
   version: z.string(),
+  current: z.string(),
   updatedAt: z.string(),
+  iteratedAt: z.string(),
   threads: z.array(ThreadSchema),
   artifactStatus: z.string(),
   artifactUpdatedAt: z.string(),
+  approvedAt: z.string().optional(),
+  agentAttached: z.boolean().optional(),
+  versions: z.array(VersionRowSchema),
 })
 
 type FeedbackView = z.infer<typeof FeedbackViewSchema>
@@ -214,6 +241,7 @@ const renderThreads = (view: FeedbackView): string => {
         thread.messages.length > 1
           ? " (+" + String(thread.messages.length - 1) + " earlier message(s))"
           : ""
+      const thinking = last?.kind === "thinking" ? " [agent thinking \u2014 replace this placeholder]" : ""
       const tags: string[] = []
       if (thread.anchorVersion !== undefined) tags.push("pinned on " + thread.anchorVersion)
       if (thread.status === "resolved" && thread.resolvedInVersion !== undefined) {
@@ -221,10 +249,53 @@ const renderThreads = (view: FeedbackView): string => {
       }
       const tagText = tags.length > 0 ? " (" + tags.join(", ") + ")" : ""
       return (
-        String(index + 1) + ". [" + thread.status + "]" + tagText + " " + target + ": " + (last?.body ?? "") + extra
+        String(index + 1) +
+        ". [" +
+        thread.status +
+        "]" +
+        tagText +
+        " " +
+        target +
+        ": " +
+        (last?.body ?? "") +
+        thinking +
+        extra
       )
     })
     .join("\n")
+}
+
+const workDutyText = (view: FeedbackView, artifactId: string): string => {
+  const pending = pendingRow(view)
+  const count = pending?.batch?.threadIds.length ?? 0
+  return (
+    "WORK DUTY on " +
+    artifactId +
+    ": iteration " +
+    (pending?.version ?? view.current) +
+    " was submitted with " +
+    String(count) +
+    " thread(s) in the frozen batch:\n" +
+    renderThreads(view) +
+    "\nAddress the batch, then publish with update_artifact (note = what changed). Publishing returns the artifact to review. Meanwhile you may reply in threads."
+  )
+}
+
+const replyDutyText = (view: FeedbackView, artifactId: string): string => {
+  const open = view.threads.filter((thread: Thread) => thread.status === "open").length
+  return (
+    "REPLY DUTY on " +
+    artifactId +
+    " (" +
+    view.current +
+    ", status " +
+    view.artifactStatus +
+    ", " +
+    String(open) +
+    " open):\n" +
+    renderThreads(view) +
+    "\nConversation only: replace thinking placeholders via PATCH or post replies. update_artifact is rejected (409) until the user hits Iterate."
+  )
 }
 
 const jsonInit = (method: string, body: unknown, signal?: AbortSignal): RequestInit => ({
@@ -266,14 +337,14 @@ export const RedlinePlugin: Plugin = async () => {
           return [
             "Artifact created: " + summary.id + " (" + summary.current + ")",
             "Review URL: " + summary.reviewUrl,
-            "Give this URL to the user, then call wait_for_feedback to block until they comment or approve.",
+            "Give this URL to the user, then call wait_for_feedback: comments wake you for replies only, the user's Iterate submits a batch for you to publish, approval means done for now.",
           ].join("\n")
         },
       }),
 
       update_artifact: tool({
         description:
-          "Publish a revised version of a redline artifact. The new version becomes current and the artifact returns to review status. Keep section ids stable so existing pins still resolve.",
+          "Publish the pending iteration of a redline artifact as a new version. Only legal while the artifact is iterating (the user hit Iterate); publishing stamps the version and returns the artifact to review. Keep section ids stable so existing pins still resolve.",
         args: {
           artifactId: tool.schema.string().describe("Artifact id from create_artifact"),
           html: tool.schema.string().describe("Complete revised HTML document"),
@@ -292,7 +363,9 @@ export const RedlinePlugin: Plugin = async () => {
             summary.current +
             " of " +
             summary.id +
-            ". Review URL: " +
+            " (iteration complete, status " +
+            summary.status +
+            "). Review URL: " +
             summary.reviewUrl +
             ". Call wait_for_feedback next."
           )
@@ -301,7 +374,7 @@ export const RedlinePlugin: Plugin = async () => {
 
       get_feedback: tool({
         description:
-          "Read the comment threads and approval status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, and the conversation.",
+          "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
         args: {
           artifactId: tool.schema.string().describe("Artifact id"),
           version: tool.schema
@@ -318,25 +391,32 @@ export const RedlinePlugin: Plugin = async () => {
           )
           const view = FeedbackViewSchema.parse(body)
           const openCount = view.threads.filter((thread: Thread) => thread.status === "open").length
-          return (
+          const pending = pendingRow(view)
+          const header =
             "Artifact " +
             params.artifactId +
             " " +
-            view.version +
+            view.current +
             ", status: " +
             view.artifactStatus +
+            ", agent: " +
+            (view.agentAttached ? "attached" : "not attached") +
             " (" +
             String(openCount) +
-            " open)" +
-            "\n" +
-            renderThreads(view)
-          )
+            " open)"
+          const pendingLine =
+            pending !== undefined
+              ? "\nPending iteration " + pending.version + " with " + String(pending.batch?.threadIds.length ?? 0) + " thread(s) \u2014 address the batch and publish with update_artifact."
+              : view.approvedAt !== undefined
+                ? "\n" + view.current + " approved \u2014 done for now."
+                : ""
+          return header + pendingLine + "\n" + renderThreads(view)
         },
       }),
 
       wait_for_feedback: tool({
         description:
-          "Block until the user leaves new feedback or approves the artifact, or until the timeout. This is how a review round ends. Esc cancels the wait.",
+          "Block until the user comments (reply duty: answer in threads, never publish), hits Iterate (work duty: address the frozen batch and publish), or approves the current version (exit: done for now, hand control back). Esc cancels the wait.",
         args: {
           artifactId: tool.schema.string().describe("Artifact id"),
           timeoutSeconds: tool.schema
@@ -347,7 +427,7 @@ export const RedlinePlugin: Plugin = async () => {
             .string()
             .optional()
             .describe(
-              "ISO timestamp; wake only for changes after it. By default any open threads return immediately, otherwise the call blocks from now.",
+              "ISO timestamp; wake only for changes after it. By default open threads or a pending iteration return immediately, otherwise the call blocks from now.",
             ),
         },
         async execute(params, ctx) {
@@ -361,6 +441,10 @@ export const RedlinePlugin: Plugin = async () => {
             const initial = FeedbackViewSchema.parse(
               await requestJson(base, artifactPath, { signal: ctx.abort }),
             )
+            // An iteration in flight is always work, whatever else happened.
+            if (initial.artifactStatus === "iterating" || pendingRow(initial) !== undefined) {
+              return workDutyText(initial, params.artifactId)
+            }
             if (params.after === undefined) {
               const openCount = initial.threads.filter((thread: Thread) => thread.status === "open").length
               if (openCount > 0) {
@@ -368,7 +452,7 @@ export const RedlinePlugin: Plugin = async () => {
                   "Feedback already waiting on " +
                   params.artifactId +
                   " (" +
-                  initial.version +
+                  initial.current +
                   ", status: " +
                   initial.artifactStatus +
                   "):\n" +
@@ -378,25 +462,33 @@ export const RedlinePlugin: Plugin = async () => {
             }
             const after =
               params.after ??
-              (initial.updatedAt > initial.artifactUpdatedAt
-                ? initial.updatedAt
-                : initial.artifactUpdatedAt)
+              maxIso([
+                initial.updatedAt,
+                initial.artifactUpdatedAt,
+                initial.iteratedAt,
+                initial.approvedAt ?? epoch,
+              ])
             const body = await requestJson(
               base,
               artifactPath + "?wait=" + String(timeoutSeconds) + "&after=" + encodeURIComponent(after),
               { signal: ctx.abort },
             )
             const view = FeedbackViewSchema.parse(body)
+            if (view.artifactStatus === "iterating" || pendingRow(view) !== undefined) {
+              return workDutyText(view, params.artifactId)
+            }
+            if (view.approvedAt !== undefined && view.approvedAt > after) {
+              return (
+                "EXIT on " +
+                params.artifactId +
+                ": " +
+                view.current +
+                " approved \u2014 done for now. Report the sign-off and hand control back to the user. The artifact stays open: a later Iterate re-attaches you."
+              )
+            }
             const changed = view.updatedAt > after || view.artifactUpdatedAt > after
             return changed
-              ? "New activity on " +
-                  params.artifactId +
-                  " (" +
-                  view.version +
-                  ", status: " +
-                  view.artifactStatus +
-                  "):\n" +
-                  renderThreads(view)
+              ? replyDutyText(view, params.artifactId)
               : "No new feedback within " +
                   String(timeoutSeconds) +
                   "s. Status is still " +

@@ -8,13 +8,16 @@ import {
   ArtifactMeta,
   ArtifactMetaSchema,
   ArtifactStatus,
+  ArtifactVersion,
   Author,
   FeedbackDoc,
   FeedbackDocSchema,
+  MessageKind,
   Thread,
   ThreadMessage,
   ThreadStatus,
   VersionSchema,
+  pendingVersion,
 } from "./artifact.models"
 import { hasErrorCode, storeError } from "./errors"
 
@@ -127,7 +130,7 @@ export const createArtifact = async (store: Store, input: CreateArtifactInput): 
     createdAt: now,
     updatedAt: now,
     current: "v1",
-    versions: [{ version: VersionSchema.parse("v1"), createdAt: now, note: input.note }],
+    versions: [{ version: VersionSchema.parse("v1"), createdAt: now, publishedAt: now, note: input.note }],
   }
   const firstVersionDir = artifactVersionDir(store, id, "v1")
   await mkdir(firstVersionDir, { recursive: true })
@@ -136,44 +139,101 @@ export const createArtifact = async (store: Store, input: CreateArtifactInput): 
   return meta
 }
 
-export type AddVersionInput = {
+export type PublishInput = {
   html: string
   note?: string
 }
 
-export const addArtifactVersion = async (
-  store: Store,
-  id: string,
-  input: AddVersionInput,
-): Promise<ArtifactMeta> =>
+// Publish the pending iteration: write the html, complete the version row,
+// and flip the artifact back to review. Only legal while iterating — this is
+// the server-side gate that keeps live comment replies consequence-free.
+export const publishIteration = async (store: Store, id: string, input: PublishInput): Promise<ArtifactMeta> =>
   withFileLock(artifactMetaPath(store, id), async () => {
     const meta = await readArtifactMeta(store, id)
-    const version = VersionSchema.parse("v" + String(meta.versions.length + 1))
+    if (meta.status !== "iterating") {
+      throw storeError(
+        "conflict",
+        "publishing requires status=iterating; comments wake the agent for replies only",
+      )
+    }
+    const pending = pendingVersion(meta)
+    if (pending === undefined) throw storeError("conflict", "no pending iteration to publish")
     const now = new Date().toISOString()
-    const dir = artifactVersionDir(store, id, version)
+    const dir = artifactVersionDir(store, id, pending.version)
     await mkdir(dir, { recursive: true })
     await writeFile(join(dir, "index.html"), input.html, "utf8")
     const updated: ArtifactMeta = {
       ...meta,
       status: "review",
       updatedAt: now,
-      current: version,
-      versions: [...meta.versions, { version: version, createdAt: now, note: input.note }],
+      current: pending.version,
+      versions: meta.versions.map((version) =>
+        version.version === pending.version
+          ? { ...version, note: input.note, publishedAt: now }
+          : version,
+      ),
     }
     await writeArtifactMeta(store, id, updated)
     return updated
   })
 
-export const setArtifactStatus = async (
+const openThreadIds = async (store: Store, id: string): Promise<string[]> => {
+  const docs = await readAllFeedbackDocs(store, id)
+  return docs.flatMap((doc) => doc.threads.filter((thread) => thread.status === "open").map((thread) => thread.id))
+}
+
+// Freeze the open threads into a pending version row and flip review ->
+// iterating. The batch is the agent's work contract for this version.
+export const startIteration = async (
   store: Store,
   id: string,
-  status: ArtifactStatus,
-): Promise<ArtifactMeta> =>
+): Promise<{ meta: ArtifactMeta; version: ArtifactVersion }> =>
   withFileLock(artifactMetaPath(store, id), async () => {
     const meta = await readArtifactMeta(store, id)
-    const updated: ArtifactMeta = { ...meta, status: status, updatedAt: new Date().toISOString() }
+    if (meta.status !== "review") {
+      throw storeError("conflict", "iteration requires status=review, got " + meta.status)
+    }
+    if (pendingVersion(meta) !== undefined) {
+      throw storeError("conflict", "an iteration is already pending")
+    }
+    const now = new Date().toISOString()
+    const version: ArtifactVersion = {
+      version: VersionSchema.parse("v" + String(meta.versions.length + 1)),
+      createdAt: now,
+      batch: { threadIds: await openThreadIds(store, id), submittedAt: now },
+    }
+    const updated: ArtifactMeta = {
+      ...meta,
+      status: "iterating",
+      iteratedAt: now,
+      updatedAt: now,
+      versions: [...meta.versions, version],
+    }
     await writeArtifactMeta(store, id, updated)
-    return updated
+    return { meta: updated, version: version }
+  })
+
+// Stamp the current version approved. Approval is data, not a loop state:
+// the artifact stays in review and can always be iterated again.
+export const approveVersion = async (store: Store, id: string, version: string): Promise<ArtifactVersion> =>
+  withFileLock(artifactMetaPath(store, id), async () => {
+    const meta = await readArtifactMeta(store, id)
+    if (meta.status === "iterating") {
+      throw storeError("conflict", "finish the iterating round before approving")
+    }
+    if (version !== meta.current) {
+      throw storeError("not-found", "only the current version can be approved: " + meta.current)
+    }
+    const row = meta.versions.find((entry) => entry.version === version)
+    if (row === undefined) throw storeError("not-found", "version not found: " + version)
+    if (row.approvedAt !== undefined) return row
+    const stamped: ArtifactVersion = { ...row, approvedAt: new Date().toISOString() }
+    await writeArtifactMeta(store, id, {
+      ...meta,
+      updatedAt: new Date().toISOString(),
+      versions: meta.versions.map((entry) => (entry.version === version ? stamped : entry)),
+    })
+    return stamped
   })
 
 export const readFeedbackDoc = async (store: Store, id: string, version: string): Promise<FeedbackDoc> => {
@@ -226,6 +286,7 @@ export const appendThread = async (store: Store, id: string, input: AppendThread
     const message: ThreadMessage = {
       id: newId("m"),
       author: input.author,
+      kind: "text",
       body: input.body,
       createdAt: now,
     }
@@ -248,6 +309,7 @@ export const appendThread = async (store: Store, id: string, input: AppendThread
 export type AppendThreadMessageInput = {
   body: string
   author: Author
+  kind?: MessageKind
 }
 
 export const appendThreadMessage = async (
@@ -264,6 +326,7 @@ export const appendThreadMessage = async (
     const message: ThreadMessage = {
       id: newId("m"),
       author: input.author,
+      kind: input.kind ?? "text",
       body: input.body,
       createdAt: new Date().toISOString(),
     }
@@ -271,6 +334,39 @@ export const appendThreadMessage = async (
     await writeFeedbackDoc(store, id, location.version, {
       ...doc,
       updatedAt: message.createdAt,
+      threads: doc.threads.map((candidate) => (candidate.id === threadId ? updated : candidate)),
+    })
+    return updated
+  })
+}
+
+// The agent's answer to a thinking placeholder: swap the kind, set the body.
+// Placeholders are the only editable messages.
+export const replaceThinkingMessage = async (
+  store: Store,
+  id: string,
+  threadId: string,
+  messageId: string,
+  body: string,
+): Promise<Thread> => {
+  const location = await findThread(store, id, threadId)
+  return withFileLock(feedbackDocPath(store, id, location.version), async () => {
+    const doc = await readFeedbackDoc(store, id, location.version)
+    const thread = doc.threads.find((candidate) => candidate.id === threadId)
+    if (thread === undefined) throw storeError("not-found", "thread not found: " + threadId)
+    const message = thread.messages.find((candidate) => candidate.id === messageId)
+    if (message === undefined || message.kind !== "thinking") {
+      throw storeError("not-found", "thinking message not found: " + messageId)
+    }
+    const updated: Thread = {
+      ...thread,
+      messages: thread.messages.map((candidate) =>
+        candidate.id === messageId ? { ...candidate, kind: "text", body: body } : candidate,
+      ),
+    }
+    await writeFeedbackDoc(store, id, location.version, {
+      ...doc,
+      updatedAt: new Date().toISOString(),
       threads: doc.threads.map((candidate) => (candidate.id === threadId ? updated : candidate)),
     })
     return updated
@@ -352,9 +448,16 @@ export const countOpenThreads = async (store: Store, id: string): Promise<number
 
 export type FeedbackView = {
   version: string
+  current: string
   updatedAt: string
+  iteratedAt: string
   artifactStatus: ArtifactStatus
   artifactUpdatedAt: string
+  // approvedAt of the current version, when it has been signed off.
+  approvedAt?: string
+  // The version ledger doubles as iteration + sign-off history. Pending rows
+  // (batch set, publishedAt absent) are visible here while iterating.
+  versions: ArtifactVersion[]
   threads: Thread[]
 }
 
@@ -389,11 +492,16 @@ export const readFeedbackView = async (
     (latest, doc) => (doc.updatedAt > latest ? doc.updatedAt : latest),
     meta.updatedAt,
   )
+  const currentRow = meta.versions.find((entry) => entry.version === meta.current)
   return {
     version: anchoredAt ?? meta.current,
+    current: meta.current,
     updatedAt: updatedAt,
+    iteratedAt: meta.iteratedAt ?? epochTimestamp,
     artifactStatus: meta.status,
     artifactUpdatedAt: meta.updatedAt,
+    approvedAt: currentRow?.approvedAt,
+    versions: meta.versions,
     threads: [...open, ...resolved],
   }
 }
