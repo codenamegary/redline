@@ -9,6 +9,8 @@ redline serves HTML artifacts in a browser shell where the user pins comments, t
 
 ## The loop contract
 
+The server can run its own agents. Two lanes: a reviewer answers comments in threads, and a worker publishes on Iterate. Each lane has its own adapter (`acp`, `opencode-sdk`, or `none`), preset, command, model, and prompt template. When the reviewer lane is configured, `create_artifact` says so in its response. Your job is then just: share the URL, stop. Replies and Iterate happen server-side. The reviewer fills thinking placeholders, and a fresh worker session gets the current version's file path under `~/.redline`, returns the next document, and the server publishes it. Approve unbinds both lanes and still means done for now. When the reviewer lane is `none`, the contract below is all yours.
+
 Two wake reasons, one exit. The server enforces the split (publishing outside iterating is a 409), so stay in your lane:
 
 - **Reply duty** — the user commented. Replace the thread's `thinking` placeholder with a real answer (PATCH), or post a reply. Answer questions, ack requests, say what you will do in the next iteration. Never touch the artifact here.
@@ -29,7 +31,9 @@ After two consecutive empty waits, hand control back instead of polling forever.
    - For architecture: label every box and edge, add a legend, and put trade-off prose next to the diagram.
    - Start with a header: title plus a one-paragraph summary of the decision or idea.
 3. Call `create_artifact` with the full HTML. It returns a review URL.
-4. Give the user the review URL and say what to look at. Then call `wait_for_feedback` (timeoutSeconds up to 300).
+4. Read `create_artifact`'s response text. It picks the loop:
+   - **Reviewer configured**: give the user the review URL and say what to look at, then stop. Do not call `wait_for_feedback`. The server's reviewer and worker agents handle replies and iteration duties.
+   - **No reviewer**: give the user the review URL and say what to look at. Then call `wait_for_feedback` (timeoutSeconds up to 300).
 5. When it wakes, act on the duty in the result:
    - **Reply duty**: fill every thinking placeholder with a real answer (PATCH each one), keep waiting. A good reply says how you will address it, e.g. "will move the legend below the diagram in the next iteration".
    - **Work duty**: read the frozen batch, revise the full HTML, call `update_artifact` with a `note` summarizing the changes. Address everything actionable in one pass.
@@ -40,11 +44,17 @@ After two consecutive empty waits, hand control back instead of polling forever.
 
 | Tool | Purpose |
 |------|---------|
-| `create_artifact` | `{title, html, prompt?, note?}` returns the review URL |
-| `update_artifact` | `{artifactId, html, note?}` publishes the pending iteration (409 unless iterating), status returns to review |
+| `create_artifact` | `{title, html, prompt?, note?}` returns the review URL. The response text is conditional: when the server has a reviewer it says to share the URL and stop, otherwise it says to call `wait_for_feedback` |
+| `update_artifact` | `{artifactId, html, note?}` publishes the pending iteration (409 unless iterating), status returns to review. Same conditional response text |
 | `get_feedback` | `{artifactId, version?}` threads, presence, pending iteration, right now |
-| `wait_for_feedback` | `{artifactId, timeoutSeconds?, after?}` blocks until reply duty, work duty, exit, or timeout |
+| `wait_for_feedback` | `{artifactId, timeoutSeconds?, after?}` blocks until reply duty, work duty, exit, or timeout. The fallback path when no reviewer is configured on the server |
 | `list_artifacts` | all artifacts with open thread counts |
+
+## Server settings
+
+Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, and Notify tabs. The preset dropdown fills the command box. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If `create_artifact`'s response does not mention a configured reviewer, the host is in fallback mode: run the wait loop yourself.
+
+Two limits worth knowing. ACP has no portable model flag, so the per-lane model only applies to the `opencode-sdk` adapter (on ACP, bake model flags into a custom command). Notify needs an `opencode-sdk` lane and an origin the plugin captured at create time.
 
 ## Bootstrap (server not running yet)
 
@@ -87,6 +97,8 @@ curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/threads/<threadId>/m
 # publish the pending iteration (409 unless the user hit Iterate)
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/versions -H 'content-type: application/json' \
   -d '{"html":"...","note":"what changed"}'
+# check the server-side lanes and prompt templates
+curl -s http://127.0.0.1:4739/api/v1/settings
 ```
 
 Feedback is also plain JSON on disk at `~/.redline/artifacts/<id>/feedback/v<N>.json`, readable with the `read` tool. Per-version files are the storage of record; the HTTP view merges them.
@@ -97,4 +109,4 @@ Each thread has `id`, `status` (`open` or `resolved`), `anchor` (`selector`, `te
 
 Threads belong to the artifact, not to a version. The default feedback view always returns every thread, open ones first, including threads pinned on older versions. Resolved threads stay readable (collapsed in the review UI, tagged with the version that resolved them). `?version=vN` filters to threads pinned on vN. The user resolves threads, never you.
 
-The view also carries `current`, `artifactStatus` (`draft`, `review`, `iterating`), `agentAttached` (a `wait_for_feedback` long-poll is in flight), `iteratedAt`, `approvedAt` (when the current version is signed off), and the version ledger — one row per iteration: `version`, `note`, `publishedAt`, `approvedAt`, and `batch` (`threadIds`, `submittedAt`) while it is the frozen work contract. A row with a batch and no `publishedAt` is the pending iteration.
+The view also carries `current`, `artifactStatus` (`draft`, `review`, `iterating`), `agentAttached` (true when a `wait_for_feedback` long-poll is in flight, a reviewer lane is bound, or a worker lane is running), plus additive per-lane booleans `reviewerAttached` and `workerRunning`, `iteratedAt`, `approvedAt` (when the current version is signed off), and the version ledger — one row per iteration: `version`, `note`, `publishedAt`, `approvedAt`, and `batch` (`threadIds`, `submittedAt`) while it is the frozen work contract. A row with a batch and no `publishedAt` is the pending iteration.
