@@ -10,6 +10,7 @@ import {
   saveSettings,
 } from "../store/settings.store"
 import { AcpProbe, probeAcpHandshake, probeLaneCommand } from "../worker/probe"
+import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
 
 const ProbeBodySchema = z.object({
   lane: z.enum(["reviewer", "worker"]),
@@ -30,6 +31,12 @@ export const registerSettingsRoutes = (
   const probeAcp = options?.probeAcp ?? probeAcpHandshake
 
   app.get("/api/v1/settings", async () => readEffectiveSettings(home))
+
+  // Shipped prompt templates: what "Reset template" refills from and what
+  // empty saved prompts fall back to. Static — no probe, no disk.
+  app.get("/api/v1/settings/defaults", async () => ({
+    prompts: { reviewer: DEFAULT_REVIEWER_PROMPT, worker: DEFAULT_WORKER_PROMPT },
+  }))
 
   // The PUT probes every lane that will actually spawn something, then
   // persists the saved values as-is — empty prompts stay empty on disk and

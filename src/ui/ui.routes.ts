@@ -4,6 +4,7 @@ import { IdParamsSchema } from "../api/artifact.schemas"
 import { requestOrigin } from "../http/request.origin"
 import { countOpenThreads, listArtifacts, readArtifactMeta, Store } from "../store/artifact.store"
 import { renderGalleryPage, GalleryItem } from "./gallery.page"
+import { renderSettingsPage } from "./settings.page"
 import { renderShellPage, ShellData } from "./shell.page"
 
 export const registerUiRoutes = (app: FastifyInstance, store: Store): void => {
@@ -26,6 +27,11 @@ export const registerUiRoutes = (app: FastifyInstance, store: Store): void => {
     )
     reply.type("text/html; charset=utf-8")
     return renderGalleryPage(items, store.home)
+  })
+
+  app.get("/settings", async (_request, reply) => {
+    reply.type("text/html; charset=utf-8")
+    return renderSettingsPage()
   })
 
   app.get("/a/:id", async (request, reply) => {

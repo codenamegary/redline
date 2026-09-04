@@ -67,6 +67,8 @@ export const renderGalleryPage = (items: GalleryItem[], home: string): string =>
   header h1 span { color: #e5484d }
   header .tagline { margin: 6px 0 0; color: #c6cbd6; font-size: 13px }
   header p { margin: 4px 0 0; color: #9aa3b2; font-size: 13px }
+  header a { color: #8ab4ff; text-decoration: none }
+  header a:hover { text-decoration: underline }
   main { padding: 20px 28px 40px }
   .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px }
   .card { border: 1px solid #262b36; background: #171a21; border-radius: 10px; padding: 14px 16px }
@@ -90,7 +92,7 @@ export const renderGalleryPage = (items: GalleryItem[], home: string): string =>
 <header>
   <h1><span>redline</span> &mdash; artifact review</h1>
   <p class="tagline">review loop for design artifacts: architecture docs, decision records, API contracts, diagrams, UI mockups</p>
-  <p>home: <code>${escapeHtml(home)}</code></p>
+  <p>home: <code>${escapeHtml(home)}</code> &middot; <a href="/settings">Settings</a></p>
 </header>
 <main>
 ${body}

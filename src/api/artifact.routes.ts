@@ -53,6 +53,16 @@ const isAgentAttached = (id: string): boolean =>
   (workerRuntime.current?.presence(id).reviewerBound ?? false) ||
   (workerRuntime.current?.presence(id).workerRunning ?? false)
 
+// Per-lane presence for the feedback view, so the shell can say which lane
+// is actually live instead of collapsing everything into agentAttached.
+const lanePresence = (id: string): { reviewerAttached: boolean; workerRunning: boolean } => {
+  const presence = workerRuntime.current?.presence(id)
+  return {
+    reviewerAttached: presence?.reviewerBound === true,
+    workerRunning: presence?.workerRunning === true,
+  }
+}
+
 export type ArtifactSummary = {
   id: string
   title: string
@@ -378,7 +388,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
     const waits = query.wait ?? 0
     if (waits <= 0) {
       const view = await readFeedbackView(store, id, query.version)
-      return { ...view, agentAttached: isAgentAttached(id) }
+      return { ...view, agentAttached: isAgentAttached(id), ...lanePresence(id) }
     }
     const deadline = Date.now() + waits * 1000
     waitingAgents.set(id, (waitingAgents.get(id) ?? 0) + 1)
@@ -391,7 +401,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
         const view = await readFeedbackView(store, id, query.version)
         const changed =
           query.after !== undefined && (view.updatedAt > query.after || view.iteratedAt > query.after)
-        if (changed || Date.now() >= deadline) return { ...view, agentAttached: true }
+        if (changed || Date.now() >= deadline) return { ...view, agentAttached: true, ...lanePresence(id) }
         await sleep(500)
       }
     } finally {

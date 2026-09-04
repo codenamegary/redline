@@ -75,6 +75,8 @@ const ViewSchema = z.object({
   updatedAt: z.string(),
   iteratedAt: z.string(),
   agentAttached: z.boolean().optional(),
+  reviewerAttached: z.boolean().optional(),
+  workerRunning: z.boolean().optional(),
   approvedAt: z.string().optional(),
   versions: z.array(
     z.object({
@@ -241,6 +243,8 @@ describe("artifact api", () => {
     expect(viewBody.threads[0]?.status).toBe("resolved")
     expect(viewBody.artifactStatus).toBe("review")
     expect(viewBody.agentAttached).toBe(false)
+    expect(viewBody.reviewerAttached).toBe(false)
+    expect(viewBody.workerRunning).toBe(false)
     expect(viewBody.versions).toHaveLength(1)
   })
 
@@ -761,6 +765,9 @@ describe("agent lane dispatch", () => {
     await waitForBound(summary.id)
     const settled = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + summary.id })
     expect(SummarySchema.parse(settled.json()).reviewer).toBe("idle")
+    const view = await laneView(summary.id)
+    expect(view.reviewerAttached).toBe(true)
+    expect(view.workerRunning).toBe(false)
   })
 
   it("dispatches a reviewer duty on a comment and patches the placeholder with the reply", async () => {
@@ -833,6 +840,11 @@ describe("agent lane dispatch", () => {
 
     await iterate(created.id)
     const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane iterate")
+    // While the work duty is parked mid-flight the feedback view reports the
+    // running worker and the still-bound reviewer.
+    const runningView = await laneView(created.id)
+    expect(runningView.reviewerAttached).toBe(true)
+    expect(runningView.workerRunning).toBe(true)
     const duty = recordedDuty(workIndex)
     expect(duty.version).toBe("v1")
     expect(duty.batchThreadIds).toEqual([thread.id])

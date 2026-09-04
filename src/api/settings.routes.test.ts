@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { FastifyInstance } from "fastify"
+import { z } from "zod"
 
 import { buildServer } from "../server"
 import { openStore } from "../store/artifact.store"
@@ -65,6 +66,19 @@ describe("settings api", () => {
     expect(body.opencodeServerUrl).toBe("http://127.0.0.1:4096")
     expect(body.prompts.reviewer).toBe(DEFAULT_REVIEWER_PROMPT)
     expect(body.prompts.worker).toBe(DEFAULT_WORKER_PROMPT)
+  })
+
+  it("serves shipped prompts from /settings/defaults without probing or disk", async () => {
+    const { app, home } = makeApp()
+    const response = await app.inject({ method: "GET", url: "/api/v1/settings/defaults" })
+    expect(response.statusCode).toBe(200)
+    const body = z
+      .object({ prompts: z.object({ reviewer: z.string(), worker: z.string() }) })
+      .parse(response.json())
+    expect(body).toEqual({
+      prompts: { reviewer: DEFAULT_REVIEWER_PROMPT, worker: DEFAULT_WORKER_PROMPT },
+    })
+    expect(existsSync(settingsPath(home))).toBe(false)
   })
 
   it("saves on PUT, echoes saved values, and fills empty prompts on read", async () => {

@@ -34,6 +34,8 @@ const clientScript = `(function () {
     current: data.current,
     status: data.status,
     attached: false,
+    reviewerAttached: false,
+    workerRunning: false,
     threads: [],
     versions: data.versions,
     pinMode: false,
@@ -76,6 +78,8 @@ const clientScript = `(function () {
       state.threads = view.threads
       state.status = view.artifactStatus
       state.attached = view.agentAttached === true
+      state.reviewerAttached = view.reviewerAttached === true
+      state.workerRunning = view.workerRunning === true
       state.current = view.current
       state.versions = view.versions
       // Auto-follow: when a new version is published, load it — unless the
@@ -121,7 +125,15 @@ const clientScript = `(function () {
     statusEl.textContent = iterating ? "iterating" : review ? "in review" : "draft"
     statusEl.className = "pill " + state.status
     presenceEl.className = "presence " + (iterating ? "working" : state.attached ? "on" : "off")
-    presenceLabel.textContent = iterating ? "agent working" : state.attached ? "agent listening" : "agent not attached"
+    presenceLabel.textContent = state.workerRunning
+      ? "worker running"
+      : iterating
+        ? "agent working"
+        : state.reviewerAttached
+          ? "reviewer attached"
+          : state.attached
+            ? "waiting in agent"
+            : "no agent"
     iterateBtn.disabled = !review || !state.attached
     iterateBtn.title = iterating
       ? "Agent is already iterating"
@@ -430,6 +442,8 @@ const clientScript = `(function () {
         view.artifactStatus,
         view.current,
         view.agentAttached,
+        view.reviewerAttached,
+        view.workerRunning,
         view.threads,
         view.versions
       ])
@@ -438,6 +452,8 @@ const clientScript = `(function () {
       state.threads = view.threads
       state.status = view.artifactStatus
       state.attached = view.agentAttached === true
+      state.reviewerAttached = view.reviewerAttached === true
+      state.workerRunning = view.workerRunning === true
       state.current = view.current
       state.versions = view.versions
       if (state.followCurrent && state.status === "review" && state.current !== state.version) {
