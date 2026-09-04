@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url"
 import { Plugin, tool } from "@opencode-ai/plugin"
 import { z } from "zod"
 
+import { buildCreateResponseText, buildUpdateResponseText, ResponseSummary } from "../agent.response"
+
 // opencode plugin for the redline review server. Mirrors src/pi/redline.extension.ts:
 // same five tool names, same HTTP API (see skills/redline/SKILL.md). The review loop is
 // turn-based: comments wake the agent for replies only; the user's Iterate action
@@ -48,9 +50,20 @@ const SummarySchema = z.object({
   versionCount: z.number(),
   openThreads: z.number(),
   reviewUrl: z.string(),
+  reviewer: z.enum(["none", "starting", "idle"]).optional(),
 })
 
 type Summary = z.infer<typeof SummarySchema>
+
+// The helpers read only the fields they format; this keeps the plugin's
+// parsed summary and the shared copy in sync at the type level.
+const asResponseSummary = (summary: Summary): ResponseSummary => ({
+  id: summary.id,
+  current: summary.current,
+  status: summary.status,
+  reviewUrl: summary.reviewUrl,
+  reviewer: summary.reviewer,
+})
 
 const ThreadSchema = z.object({
   id: z.string(),
@@ -321,7 +334,7 @@ export const RedlinePlugin: Plugin = async () => {
               "Complete self-contained HTML document: inline CSS and JS, inline SVG diagrams, no external requests",
             ),
         },
-        async execute(params) {
+        async execute(params, ctx) {
           const base = await ensureDaemon()
           const body = await requestJson(
             base,
@@ -331,14 +344,14 @@ export const RedlinePlugin: Plugin = async () => {
               prompt: params.prompt ?? "",
               note: params.note,
               html: params.html,
+              // Origin capture for server-side notify pings. The tool
+              // context has no opencode server URL, so only the session id
+              // travels; the redline server resolves the URL itself.
+              origin: { host: "opencode", sessionId: ctx.sessionID },
             }),
           )
           const summary = SummarySchema.parse(body)
-          return [
-            "Artifact created: " + summary.id + " (" + summary.current + ")",
-            "Review URL: " + summary.reviewUrl,
-            "Give this URL to the user, then call wait_for_feedback: comments wake you for replies only, the user's Iterate submits a batch for you to publish, approval means done for now.",
-          ].join("\n")
+          return buildCreateResponseText(asResponseSummary(summary))
         },
       }),
 
@@ -358,17 +371,7 @@ export const RedlinePlugin: Plugin = async () => {
             jsonInit("POST", { html: params.html, note: params.note }),
           )
           const summary = SummarySchema.parse(body)
-          return (
-            "Published " +
-            summary.current +
-            " of " +
-            summary.id +
-            " (iteration complete, status " +
-            summary.status +
-            "). Review URL: " +
-            summary.reviewUrl +
-            ". Call wait_for_feedback next."
-          )
+          return buildUpdateResponseText(asResponseSummary(summary))
         },
       }),
 

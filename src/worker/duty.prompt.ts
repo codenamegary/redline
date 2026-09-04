@@ -1,7 +1,9 @@
+import { stat } from "node:fs/promises"
+
 import { z } from "zod"
 
 import { Thread, ThreadMessage } from "../store/artifact.models"
-import { DutyInput, DutyResult, ThreadRef } from "./host.adapter"
+import { DutyInput, DutyResult, SeedSpec, ThreadRef } from "./host.adapter"
 
 export type TemplateVars = {
   title: string
@@ -100,6 +102,27 @@ export const buildWorkPrompt = (input: DutyInput): string =>
     threads: input.threads,
     batch: input.batchThreadIds ?? [],
   }) + workContract
+
+const fileExists = async (path: string): Promise<boolean> => {
+  try {
+    await stat(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// First duty on a worker lane carries the document. A htmlPath that exists
+// on disk is passed as a pointer (never inlined); otherwise the seed html
+// ships inline. Reviewer lanes never get HTML. Callers own the once-per-
+// session tracking via their seeded flag.
+export const buildSeedContext = async (input: DutyInput, seed?: SeedSpec): Promise<string> => {
+  if (seed === undefined || input.lane !== "worker") return ""
+  if (input.htmlPath !== undefined && (await fileExists(input.htmlPath))) {
+    return "The current document is on disk at " + input.htmlPath + ". Read it first."
+  }
+  return "Current document (v" + seed.version + "):\n\n```html\n" + seed.html + "\n```"
+}
 
 const ReplyItemsSchema = z.array(
   z.object({

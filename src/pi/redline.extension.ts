@@ -10,6 +10,8 @@ import { Type } from "typebox"
 import type { Static } from "typebox"
 import { z } from "zod"
 
+import { buildCreateResponseText, buildUpdateResponseText, ResponseSummary } from "../agent.response"
+
 const repoUrl = process.env.REDLINE_REPO ?? "https://github.com/codenamegary/redline.git"
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..")
@@ -35,9 +37,20 @@ const SummarySchema = z.object({
   versionCount: z.number(),
   openThreads: z.number(),
   reviewUrl: z.string(),
+  reviewer: z.enum(["none", "starting", "idle"]).optional(),
 })
 
 type Summary = z.infer<typeof SummarySchema>
+
+// The helpers read only the fields they format; this keeps the extension's
+// parsed summary and the shared copy in sync at the type level.
+const asResponseSummary = (summary: Summary): ResponseSummary => ({
+  id: summary.id,
+  current: summary.current,
+  status: summary.status,
+  reviewUrl: summary.reviewUrl,
+  reviewer: summary.reviewer,
+})
 
 const ThreadSchema = z.object({
   id: z.string(),
@@ -317,7 +330,7 @@ export default function (pi: ExtensionAPI): void {
       "Use create_artifact when the user wants a reviewable HTML artifact such as an architecture doc, decision record, API contract, diagram, or UI mockup. Share the returned review URL with the user, then call wait_for_feedback.",
     ],
     parameters: createParamsSchema(),
-    async execute(_toolCallId, params: CreateParams, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params: CreateParams, _signal, _onUpdate, ctx) {
       const base = await ensureDaemon()
       const body = await requestJson(
         base,
@@ -327,15 +340,16 @@ export default function (pi: ExtensionAPI): void {
           prompt: params.prompt ?? "",
           note: params.note,
           html: params.html,
+          // Origin capture for server-side notify pings. pi has no opencode
+          // server URL to offer, so only the session id travels.
+          origin: { host: "pi", sessionId: ctx.sessionManager.getSessionId() },
         }),
       )
       const summary = SummarySchema.parse(body)
-      const text = [
-        "Artifact created: " + summary.id + " (" + summary.current + ")",
-        "Review URL: " + summary.reviewUrl,
-        "Give this URL to the user, then call wait_for_feedback: comments wake you for replies only, the user's Iterate submits a batch for you to publish, approval means done for now.",
-      ].join("\n")
-      return { content: [{ type: "text", text: text }], details: summary }
+      return {
+        content: [{ type: "text", text: buildCreateResponseText(asResponseSummary(summary)) }],
+        details: summary,
+      }
     },
   })
 
@@ -360,17 +374,10 @@ export default function (pi: ExtensionAPI): void {
         jsonInit("POST", { html: params.html, note: params.note }),
       )
       const summary = SummarySchema.parse(body)
-      const text =
-        "Published " +
-        summary.current +
-        " of " +
-        summary.id +
-        " (iteration complete, status " +
-        summary.status +
-        "). Review URL: " +
-        summary.reviewUrl +
-        ". Call wait_for_feedback next."
-      return { content: [{ type: "text", text: text }], details: summary }
+      return {
+        content: [{ type: "text", text: buildUpdateResponseText(asResponseSummary(summary)) }],
+        details: summary,
+      }
     },
   })
 

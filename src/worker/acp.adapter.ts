@@ -1,9 +1,14 @@
 import { spawn } from "node:child_process"
-import { stat } from "node:fs/promises"
 
 import { hasErrorCode } from "../store/errors"
 import { LaneConfig } from "../store/settings.models"
-import { buildReplyPrompt, buildWorkPrompt, parseReplyResult, parseWorkResult } from "./duty.prompt"
+import {
+  buildReplyPrompt,
+  buildSeedContext,
+  buildWorkPrompt,
+  parseReplyResult,
+  parseWorkResult,
+} from "./duty.prompt"
 import { AgentSession, DutyInput, DutyResult, HostAdapter, Lane, SeedSpec } from "./host.adapter"
 
 const defaultTimeoutSeconds = 300
@@ -238,15 +243,6 @@ type InternalSession = {
   seeded: boolean
 }
 
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
-}
-
 // The adapter always ships discard, so the concrete type requires it while
 // staying assignable to HostAdapter.
 export type AcpAdapter = HostAdapter & { discard: (session: AgentSession) => Promise<void> }
@@ -292,19 +288,14 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     return sessionId
   }
 
-  // First duty on a worker session carries the document. A htmlPath that
-  // exists on disk is passed as a pointer (never inlined); otherwise the
-  // seed html ships inline. Reviewer sessions never get HTML.
+  // First duty on a worker session carries the document. The seed-context
+  // wording lives in duty.prompt.ts (shared with the opencode-sdk adapter);
+  // this wrapper only owns the once-per-session tracking.
   const seedContext = async (hostSessionId: string, input: DutyInput): Promise<string> => {
     const state = sessions.get(hostSessionId)
-    const seed = state?.seed
     if (state === undefined || input.lane !== "worker" || state.seeded) return ""
     state.seeded = true
-    if (seed === undefined) return ""
-    if (input.htmlPath !== undefined && (await fileExists(input.htmlPath))) {
-      return "The current document is on disk at " + input.htmlPath + ". Read it first."
-    }
-    return "Current document (v" + seed.version + "):\n\n```html\n" + seed.html + "\n```"
+    return buildSeedContext(input, state.seed)
   }
 
   const ensureSession = async (

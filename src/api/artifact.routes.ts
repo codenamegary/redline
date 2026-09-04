@@ -26,6 +26,7 @@ import { readEffectiveSettings } from "../store/settings.store"
 import { createAcpAdapter } from "../worker/acp.adapter"
 import { createDispatcher, DispatcherAdapters, workerRuntime } from "../worker/dispatcher"
 import { DutyResult, Lane, SeedSpec, ThreadRef } from "../worker/host.adapter"
+import { createOpenCodeSdkAdapter } from "../worker/opencode.sdk.adapter"
 import {
   AddVersionBodySchema,
   ApproveParamsSchema,
@@ -235,13 +236,17 @@ export type ApiRoutesOptions = {
 }
 
 export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: ApiRoutesOptions): void => {
-  // Server-owned agent lanes. The real ACP adapter reads lane config from
-  // live settings at duty time; tests inject fakes through ServerOptions.
+  // Server-owned agent lanes. The real adapters read lane config from live
+  // settings at duty time; tests inject fakes through ServerOptions.
   workerRuntime.current = createDispatcher({
     home: store.home,
     adapters: options?.adapters ?? {
       acp: createAcpAdapter({
         getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
+      }),
+      "opencode-sdk": createOpenCodeSdkAdapter({
+        getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
+        getServerUrl: async () => (await readEffectiveSettings(store.home)).opencodeServerUrl,
       }),
     },
     handlers: {
