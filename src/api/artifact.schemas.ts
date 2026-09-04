@@ -5,6 +5,7 @@ import {
   ArtifactIdSchema,
   AuthorSchema,
   IsoTimestampSchema,
+  OriginRefSchema,
   ThreadStatusSchema,
   VersionSchema,
 } from "../store/artifact.models"
@@ -32,6 +33,7 @@ export const CreateArtifactBodySchema = z.object({
   prompt: z.string().max(4000).default(""),
   note: z.string().max(500).optional(),
   html: z.string().min(1).max(5_000_000),
+  origin: OriginRefSchema.optional(),
 })
 
 export type CreateArtifactBody = z.infer<typeof CreateArtifactBodySchema>

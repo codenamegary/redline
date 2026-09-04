@@ -7,6 +7,7 @@ import { sendProblem } from "./api/problem.details"
 import { registerArtifactFiles } from "./http/static.handlers"
 import { isStoreError } from "./store/errors"
 import { Store } from "./store/artifact.store"
+import { DispatcherAdapters } from "./worker/dispatcher"
 import { AcpProbe } from "./worker/probe"
 import { registerUiRoutes } from "./ui/ui.routes"
 
@@ -15,6 +16,9 @@ export type ServerOptions = {
   loggerLevel?: string
   // Test seam: overrides the ACP handshake probe in the settings routes.
   probeAcp?: AcpProbe
+  // Test seam: replaces the dispatcher's default adapter registry (the real
+  // ACP adapter) so lane duties run against fakes.
+  adapters?: DispatcherAdapters
 }
 
 const errorStatus = (error: unknown): number | undefined => {
@@ -53,7 +57,7 @@ export const buildServer = (options: ServerOptions): FastifyInstance => {
     return sendProblem(reply, 404, "Not found", "route not found: " + (request.raw.url ?? ""))
   })
 
-  registerApiRoutes(app, options.store)
+  registerApiRoutes(app, options.store, { adapters: options.adapters })
   registerSettingsRoutes(app, options.store.home, { probeAcp: options.probeAcp })
   registerArtifactFiles(app, options.store)
   registerUiRoutes(app, options.store)

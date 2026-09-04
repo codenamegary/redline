@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
+
 import { FastifyInstance } from "fastify"
 
 import { requestOrigin } from "../http/request.origin"
@@ -5,6 +8,7 @@ import {
   approveVersion,
   appendThread,
   appendThreadMessage,
+  artifactVersionDir,
   countOpenThreads,
   createArtifact,
   listArtifacts,
@@ -17,10 +21,11 @@ import {
   Store,
 } from "../store/artifact.store"
 import { storeError } from "../store/errors"
-import { ArtifactMeta } from "../store/artifact.models"
+import { ArtifactMeta, Thread } from "../store/artifact.models"
 import { readEffectiveSettings } from "../store/settings.store"
 import { createAcpAdapter } from "../worker/acp.adapter"
-import { createDispatcher, workerRuntime } from "../worker/dispatcher"
+import { createDispatcher, DispatcherAdapters, workerRuntime } from "../worker/dispatcher"
+import { DutyResult, Lane, SeedSpec, ThreadRef } from "../worker/host.adapter"
 import {
   AddVersionBodySchema,
   ApproveParamsSchema,
@@ -57,11 +62,19 @@ export type ArtifactSummary = {
   versionCount: number
   openThreads: number
   reviewUrl: string
+  // Lane status contract consumed by plugins (Phase 5). reviewer is "starting"
+  // between create and the async bind, "idle" once bound, "none" when the
+  // configured reviewer adapter is "none". worker reads "idle" whenever a
+  // worker adapter is configured, "none" otherwise.
+  reviewer: "none" | "starting" | "idle"
+  worker: "none" | "idle"
 }
 
 const artifactApiUrl = (origin: string, id: string): string => origin + "/api/v1/artifacts/" + id
 
 const summarizeArtifact = async (store: Store, origin: string, meta: ArtifactMeta): Promise<ArtifactSummary> => {
+  const settings = await readEffectiveSettings(store.home)
+  const presence = workerRuntime.current?.presence(meta.id)
   return {
     id: meta.id,
     title: meta.title,
@@ -72,25 +85,169 @@ const summarizeArtifact = async (store: Store, origin: string, meta: ArtifactMet
     versionCount: meta.versions.length,
     openThreads: await countOpenThreads(store, meta.id),
     reviewUrl: origin + "/a/" + meta.id,
+    reviewer:
+      settings.reviewer.adapter === "none"
+        ? "none"
+        : presence?.reviewerBound === true
+          ? "idle"
+          : "starting",
+    worker: settings.worker.adapter === "none" ? "none" : "idle",
   }
 }
 
-export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
+// Attaching reads settings on a background task, so the bind lands a tick
+// later. Dispatch helpers give it this long to land before enqueueing.
+const laneBindTimeoutMs = 2000
+
+const waitForLaneBind = async (artifactId: string, lane: Lane): Promise<boolean> => {
+  const deadline = Date.now() + laneBindTimeoutMs
+  for (;;) {
+    const presence = workerRuntime.current?.presence(artifactId)
+    if ((lane === "reviewer" ? presence?.reviewerBound : presence?.workerBound) === true) return true
+    if (Date.now() >= deadline) return false
+    await sleep(5)
+  }
+}
+
+// Open threads whose LAST message is a thinking placeholder: the unanswered
+// questions a reply duty must fill.
+const thinkingTargets = (threads: Thread[]): ThreadRef[] =>
+  threads
+    .filter((thread) => thread.status === "open")
+    .flatMap((thread) => {
+      const last = thread.messages[thread.messages.length - 1]
+      return last !== undefined && last.kind === "thinking"
+        ? [{ threadId: thread.id, messageId: last.id }]
+        : []
+    })
+
+const collectTargets = async (store: Store, artifactId: string): Promise<ThreadRef[]> =>
+  thinkingTargets((await readFeedbackView(store, artifactId)).threads)
+
+// Placeholders can vanish mid-duty (thread resolved, artifact approved);
+// a missed patch is swallowed per item, never fatal to the batch.
+const tryPatchTarget = async (
+  store: Store,
+  artifactId: string,
+  target: ThreadRef,
+  body: string,
+): Promise<boolean> => {
+  try {
+    await replaceThinkingMessage(store, artifactId, target.threadId, target.messageId, body)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Every origin ping reads origin (plus title/current) from fresh meta at
+// send time, so approvals and publishes that raced the duty still read right.
+const notifyOriginLine = async (
+  store: Store,
+  artifactId: string,
+  line: (meta: ArtifactMeta) => string,
+): Promise<void> => {
+  const meta = await readArtifactMeta(store, artifactId).catch(() => undefined)
+  if (meta === undefined) return
+  await workerRuntime.current?.notifyOrigin(artifactId, meta.origin, line(meta))
+}
+
+// Fire-and-forget reviewer dispatch, called at the end of the comment
+// routes after the response payload is built. Never awaited by the route.
+const dispatchReplies = async (store: Store, artifactId: string): Promise<void> => {
+  const dispatcher = workerRuntime.current
+  if (dispatcher === undefined) return
+  const settings = await readEffectiveSettings(store.home)
+  if (settings.reviewer.adapter === "none") return
+  if (!dispatcher.presence(artifactId).reviewerBound) {
+    // Comment without a prior attach (settings flipped after create, server
+    // restarted): re-attach and give the async bind a beat before enqueue.
+    dispatcher.attachReviewer(artifactId)
+    if (!(await waitForLaneBind(artifactId, "reviewer"))) return
+  }
+  const meta = await readArtifactMeta(store, artifactId)
+  const view = await readFeedbackView(store, artifactId)
+  const openThreads = view.threads.filter((thread) => thread.status === "open")
+  const targets = thinkingTargets(openThreads)
+  if (targets.length === 0) return
+  dispatcher.enqueueReply(artifactId, {
+    lane: "reviewer",
+    promptTemplate: settings.prompts.reviewer,
+    brief: meta.prompt,
+    title: meta.title,
+    version: meta.current,
+    threads: openThreads,
+    targets: targets,
+  })
+}
+
+const handleReplies = async (
+  store: Store,
+  artifactId: string,
+  items: { threadId: string; messageId: string; body: string }[],
+): Promise<void> => {
+  let applied = 0
+  for (const item of items) {
+    if (await tryPatchTarget(store, artifactId, item, item.body)) applied += 1
+  }
+  if (applied === 0) return
+  await notifyOriginLine(
+    store,
+    artifactId,
+    (meta) => "replied to " + String(applied) + " thread(s) on " + meta.title + " (" + meta.current + ")",
+  )
+}
+
+const handleDocument = async (
+  store: Store,
+  artifactId: string,
+  doc: DutyResult & { kind: "document" },
+): Promise<void> => {
+  const meta = await readArtifactMeta(store, artifactId)
+  // The artifact moved on while the duty flew (user approved or published
+  // manually): the document is stale, drop it.
+  if (meta.status !== "iterating") return
+  await publishIteration(store, artifactId, { html: doc.html, note: doc.note })
+  await notifyOriginLine(
+    store,
+    artifactId,
+    (fresh) => "published " + fresh.current + " of " + fresh.title + " — " + (doc.note ?? ""),
+  )
+}
+
+const handleError = async (store: Store, artifactId: string, lane: Lane, detail: string): Promise<void> => {
+  if (lane === "reviewer") {
+    // Patch every outstanding placeholder so no "…" dangles forever.
+    const targets = await collectTargets(store, artifactId)
+    for (const target of targets) {
+      await tryPatchTarget(store, artifactId, target, "reviewer unavailable: " + detail)
+    }
+    return
+  }
+  // Worker errors mutate nothing: the artifact stays iterating so the user
+  // can re-Iterate or the fallback agent can publish.
+  await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
+}
+
+export type ApiRoutesOptions = {
+  // Test seam: replaces the default adapter registry (the real ACP adapter).
+  adapters?: DispatcherAdapters
+}
+
+export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: ApiRoutesOptions): void => {
   // Server-owned agent lanes. The real ACP adapter reads lane config from
-  // live settings at duty time; handlers stay no-op stubs until the
-  // worker-agent loop phase wires them. Nothing calls attachReviewer or
-  // attachWorker yet, so presence stays false under default settings.
+  // live settings at duty time; tests inject fakes through ServerOptions.
   workerRuntime.current = createDispatcher({
     home: store.home,
-    adapters: {
+    adapters: options?.adapters ?? {
       acp: createAcpAdapter({
         getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
       }),
     },
     handlers: {
-      onReplies: () => {},
-      onDocument: () => {},
-      onError: () => {},
+      onReplies: (artifactId, result) => handleReplies(store, artifactId, result.items),
+      onDocument: (artifactId, doc) => handleDocument(store, artifactId, doc),
+      onError: (artifactId, lane, detail) => handleError(store, artifactId, lane, detail),
     },
   })
 
@@ -106,6 +263,10 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
     const body = CreateArtifactBodySchema.parse(request.body)
     const meta = await createArtifact(store, body)
     const origin = requestOrigin(request)
+    // Attach the reviewer lane right away so comments from the first minute
+    // get live replies. Bind lands async; the summary reports "starting".
+    const settings = await readEffectiveSettings(store.home)
+    if (settings.reviewer.adapter !== "none") workerRuntime.current?.attachReviewer(meta.id)
     reply.header("location", artifactApiUrl(origin, meta.id))
     return reply.status(201).send(await summarizeArtifact(store, origin, meta))
   })
@@ -124,13 +285,56 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
 
   // Submit the feedback batch: freeze open threads into a pending version
   // row and flip review -> iterating. The UI gates the button on presence,
-  // but the API accepts detached iterations so they recover later.
+  // but the API accepts detached iterations so they recover later. With a
+  // worker adapter configured, the frozen batch is dispatched as a work duty.
   app.post("/api/v1/artifacts/:id/iterations", async (request, reply) => {
     const { id } = IdParamsSchema.parse(request.params)
     if ((await countOpenThreads(store, id)) === 0) {
       throw storeError("unprocessable", "nothing to iterate: no open threads")
     }
+    const settings = await readEffectiveSettings(store.home)
+    const dispatcher = workerRuntime.current
+    // One work duty at a time per artifact: reject before startIteration so
+    // a busy worker never leaves a stranded iterating artifact behind.
+    if (dispatcher?.presence(id).workerRunning === true) {
+      throw storeError("conflict", "worker is busy")
+    }
     const { meta, version } = await startIteration(store, id)
+    if (settings.worker.adapter !== "none" && dispatcher !== undefined) {
+      dispatcher.attachWorker(id)
+      const batchThreadIds = version.batch?.threadIds ?? []
+      const view = await readFeedbackView(store, id)
+      const batchThreads = view.threads.filter((thread) => batchThreadIds.includes(thread.id))
+      // Current version's document on disk: <home>/artifacts/<id>/<version>/index.html.
+      const htmlPath = join(artifactVersionDir(store, id, meta.current), "index.html")
+      const seed: SeedSpec = {
+        html: await readFile(htmlPath, "utf8").catch(() => ""),
+        version: meta.current,
+      }
+      const bound = await waitForLaneBind(id, "worker")
+      const enqueued = dispatcher.enqueueWork(
+        id,
+        {
+          lane: "worker",
+          promptTemplate: settings.prompts.worker,
+          brief: meta.prompt,
+          title: meta.title,
+          version: meta.current,
+          threads: batchThreads,
+          targets: [],
+          batchThreadIds: batchThreadIds,
+          htmlPath: htmlPath,
+        },
+        seed,
+      )
+      // Rare: the lane never bound (broken adapter) or lost the race. The
+      // status already flipped, so fail the lane (notifies origin) and let
+      // the user re-Iterate or the fallback agent publish.
+      if (!bound || !enqueued) {
+        await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
+        throw storeError("conflict", "worker is busy")
+      }
+    }
     reply.header("location", artifactApiUrl(requestOrigin(request), id))
     return reply.status(201).send({
       status: meta.status,
@@ -153,10 +357,13 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
   })
 
   // Approval is data on a version, not a loop state: the artifact stays in
-  // review and can always be iterated again.
+  // review and can always be iterated again. Ends the agent round: lanes
+  // detach (in-flight duties still land) and the origin hears the verdict.
   app.post("/api/v1/artifacts/:id/versions/:version/approve", async (request) => {
     const { id, version } = ApproveParamsSchema.parse(request.params)
     const row = await approveVersion(store, id, version)
+    workerRuntime.current?.unbindAll(id)
+    void notifyOriginLine(store, id, () => version + " approved — done for now").catch(() => undefined)
     return row
   })
 
@@ -208,6 +415,9 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
             kind: "thinking",
           })
         : thread
+    // Fire-and-forget: the route answers with the placeholder now; the
+    // reviewer duty fills it from the lane.
+    void dispatchReplies(store, id).catch(() => undefined)
     reply.header("location", artifactApiUrl(requestOrigin(request), id) + "/threads/" + thread.id)
     return reply.status(201).send(withPlaceholder)
   })
@@ -232,6 +442,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
         kind: "thinking",
       })
     }
+    void dispatchReplies(store, id).catch(() => undefined)
     return reply.status(201).send(thread)
   })
 

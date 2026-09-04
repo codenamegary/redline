@@ -1,13 +1,37 @@
-import { afterAll, describe, expect, it } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 
+import { FastifyInstance } from "fastify"
+
 import { buildServer } from "../server"
-import { openStore } from "../store/artifact.store"
+import { openStore, readArtifactMeta } from "../store/artifact.store"
+import { workerRuntime } from "../worker/dispatcher"
+import {
+  AgentSession,
+  DutyInput,
+  DutyResult,
+  HostAdapter,
+  Lane,
+  OriginRef,
+  SeedSpec,
+} from "../worker/host.adapter"
+import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
 
 const home = mkdtempSync(join(tmpdir(), "redline-routes-"))
+// Lane dispatch now keys off settings (default adapter is "acp"); this shared
+// fixture pins both lanes off so the plain HTTP tests keep their detached
+// semantics. Lane integration gets its own server below.
+writeFileSync(
+  join(home, "settings.json"),
+  JSON.stringify({
+    reviewer: { adapter: "none", preset: "custom", acpCommand: ["unused"] },
+    worker: { adapter: "none", preset: "custom", acpCommand: ["unused"] },
+    prompts: { reviewer: "", worker: "" },
+  }),
+)
 const app = buildServer({ store: openStore(home), loggerLevel: "error" })
 
 afterAll(async () => {
@@ -23,6 +47,8 @@ const SummarySchema = z.object({
   versionCount: z.number(),
   openThreads: z.number(),
   reviewUrl: z.string(),
+  reviewer: z.string(),
+  worker: z.string(),
 })
 
 const MessageSchema = z.object({
@@ -528,5 +554,398 @@ describe("artifact api", () => {
     await poller
     const view = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/feedback" })
     expect(ViewSchema.parse(view.json()).agentAttached).toBe(false)
+  })
+
+  it("iterates without a configured worker and keeps the manual publish fallback", async () => {
+    const created = await createArtifact("No worker iterate", "<p>nw v1</p>")
+    expect(created.reviewer).toBe("none")
+    expect(created.worker).toBe("none")
+
+    await createThread(created.id, "make it better")
+    const iterated = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(iterated.statusCode).toBe(201)
+    expect(z.object({ status: z.string() }).parse(iterated.json()).status).toBe("iterating")
+
+    // No duty was dispatched: the fallback agent publishes through the API.
+    const published = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions",
+      payload: { html: "<p>nw v2</p>", note: "manual publish" },
+    })
+    expect(published.statusCode).toBe(201)
+    expect(SummarySchema.parse(published.json()).current).toBe("v2")
+  })
+})
+
+describe("agent lane dispatch", () => {
+  const laneHome = mkdtempSync(join(tmpdir(), "redline-lanes-"))
+  const laneStore = openStore(laneHome)
+  let laneApp: FastifyInstance
+
+  // Duty bookkeeping. runDuty parks every duty on a deferred the test
+  // resolves, so store mutations happen deterministically.
+  const recorded: {
+    duties: DutyInput[]
+    seeds: (SeedSpec | undefined)[]
+    notes: { origin: OriginRef; text: string }[]
+  } = { duties: [], seeds: [], notes: [] }
+  const pending: { promise: Promise<DutyResult>; resolve: (result: DutyResult) => void; reject: (error: Error) => void }[] = []
+
+  const deferred = (): (typeof pending)[number] => {
+    let resolve!: (result: DutyResult) => void
+    let reject!: (error: Error) => void
+    const promise = new Promise<DutyResult>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  const fakeResult = (input: DutyInput): DutyResult =>
+    input.lane === "reviewer"
+      ? {
+          kind: "replies",
+          items: input.targets.map((target) => ({ ...target, body: "reply:" + target.messageId })),
+        }
+      : { kind: "document", html: "<p>fake next</p>", note: "redline-note" }
+
+  const fakeAcp: HostAdapter = {
+    id: "acp",
+    canNotifyOrigin: () => true,
+    ensureSession: async (lane: Lane, artifactId: string, seed?: SeedSpec) => {
+      recorded.seeds.push(seed)
+      return { artifactId: artifactId, lane: lane, hostSessionId: "fake-1" }
+    },
+    runDuty: async (session: AgentSession, input: DutyInput) => {
+      recorded.duties.push(input)
+      const gate = deferred()
+      pending.push(gate)
+      return gate.promise
+    },
+    discard: async () => {},
+    notifyOrigin: async (origin: OriginRef, text: string) => {
+      recorded.notes.push({ origin: origin, text: text })
+    },
+  }
+
+  beforeAll(async () => {
+    writeFileSync(
+      join(laneHome, "settings.json"),
+      JSON.stringify({
+        reviewer: { adapter: "acp", preset: "custom", acpCommand: ["fake-agent"] },
+        worker: { adapter: "acp", preset: "custom", acpCommand: ["fake-agent"] },
+        prompts: { reviewer: "", worker: "" },
+      }),
+    )
+    laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: { acp: fakeAcp } })
+  })
+
+  afterAll(async () => {
+    await laneApp.close()
+    rmSync(laneHome, { recursive: true, force: true })
+  })
+
+  beforeEach(() => {
+    recorded.duties.length = 0
+    recorded.seeds.length = 0
+    recorded.notes.length = 0
+    pending.length = 0
+  })
+
+  const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const waitFor = async (check: () => boolean | Promise<boolean>): Promise<void> => {
+    const deadline = Date.now() + 2000
+    for (;;) {
+      if (await check()) return
+      if (Date.now() >= deadline) throw new Error("condition not met within 2s")
+      await sleep(5)
+    }
+  }
+
+  const waitForDuty = async (match: (duty: DutyInput) => boolean): Promise<number> => {
+    const deadline = Date.now() + 2000
+    for (;;) {
+      const index = recorded.duties.findIndex(match)
+      if (index >= 0) return index
+      if (Date.now() >= deadline) throw new Error("duty not recorded within 2s")
+      await sleep(5)
+    }
+  }
+
+  const recordedDuty = (index: number): DutyInput => {
+    const duty = recorded.duties[index]
+    if (duty === undefined) throw new Error("no duty recorded at index " + String(index))
+    return duty
+  }
+
+  const resolveDuty = (index: number): void => {
+    const gate = pending[index]
+    if (gate === undefined) throw new Error("no pending duty at index " + String(index))
+    gate.resolve(fakeResult(recordedDuty(index)))
+  }
+
+  const rejectDuty = (index: number, error: Error): void => {
+    const gate = pending[index]
+    if (gate === undefined) throw new Error("no pending duty at index " + String(index))
+    gate.reject(error)
+  }
+
+  const waitForBound = async (artifactId: string): Promise<void> =>
+    waitFor(() => workerRuntime.current?.presence(artifactId).reviewerBound === true)
+
+  const createLaneArtifact = async (
+    title: string,
+    html: string,
+    origin?: OriginRef,
+  ): Promise<z.infer<typeof SummarySchema>> => {
+    const response = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: { title: title, html: html, origin: origin },
+    })
+    if (response.statusCode !== 201) throw new Error("lane fixture create failed: " + response.body)
+    return SummarySchema.parse(response.json())
+  }
+
+  const createLaneThread = async (artifactId: string, body: string): Promise<z.infer<typeof ThreadSchema>> => {
+    const response = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + artifactId + "/feedback",
+      payload: { body: body },
+    })
+    expect(response.statusCode).toBe(201)
+    return ThreadSchema.parse(response.json())
+  }
+
+  const laneView = async (artifactId: string): Promise<z.infer<typeof ViewSchema>> => {
+    const response = await laneApp.inject({
+      method: "GET",
+      url: "/api/v1/artifacts/" + artifactId + "/feedback",
+    })
+    return ViewSchema.parse(response.json())
+  }
+
+  const iterate = async (artifactId: string): Promise<void> => {
+    const response = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + artifactId + "/iterations",
+      payload: {},
+    })
+    expect(response.statusCode).toBe(201)
+  }
+
+  it("creates with origin, persists it, and reports lane status", async () => {
+    const response = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: {
+        title: "Lane create",
+        html: "<p>lane-a</p>",
+        prompt: "make it pop",
+        origin: { host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096" },
+      },
+    })
+    expect(response.statusCode).toBe(201)
+    const summary = SummarySchema.parse(response.json())
+    expect(["starting", "idle"]).toContain(summary.reviewer)
+    expect(summary.worker).toBe("idle")
+
+    const meta = await readArtifactMeta(laneStore, summary.id)
+    expect(meta.origin).toEqual({ host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096" })
+
+    await waitForBound(summary.id)
+    const settled = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + summary.id })
+    expect(SummarySchema.parse(settled.json()).reviewer).toBe("idle")
+  })
+
+  it("dispatches a reviewer duty on a comment and patches the placeholder with the reply", async () => {
+    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>", { host: "pi", sessionId: "s-b" })
+    await waitForBound(created.id)
+
+    const thread = await createLaneThread(created.id, "the hero is huge")
+    expect(thread.messages).toHaveLength(2)
+    const placeholder = thread.messages[1]
+    if (placeholder === undefined) throw new Error("placeholder missing")
+    expect(placeholder.kind).toBe("thinking")
+
+    const dutyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane reply")
+    const duty = recordedDuty(dutyIndex)
+    expect(duty.promptTemplate).toBe(DEFAULT_REVIEWER_PROMPT)
+    expect(duty.brief).toBe("")
+    expect(duty.version).toBe("v1")
+    expect(duty.targets).toEqual([{ threadId: thread.id, messageId: placeholder?.id }])
+    expect(duty.threads.map((entry) => entry.id)).toEqual([thread.id])
+
+    resolveDuty(dutyIndex)
+    await waitFor(async () => {
+      const view = await laneView(created.id)
+      const messages = view.threads[0]?.messages ?? []
+      return messages[1]?.kind === "text" && messages[1]?.body === "reply:" + (placeholder?.id ?? "")
+    })
+    await waitFor(() => recorded.notes.length === 1)
+    expect(recorded.notes[0]?.text).toBe("replied to 1 thread(s) on Lane reply (v1)")
+    expect(recorded.notes[0]?.origin).toEqual({ host: "pi", sessionId: "s-b" })
+  })
+
+  it("dispatches again with a fresh target on a follow-up comment", async () => {
+    const created = await createLaneArtifact("Lane followup", "<p>lane-c</p>")
+    await waitForBound(created.id)
+
+    const thread = await createLaneThread(created.id, "first comment")
+    const firstIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane followup")
+    resolveDuty(firstIndex)
+    await waitFor(async () => (await laneView(created.id)).threads[0]?.messages[1]?.kind === "text")
+
+    const followup = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/threads/" + thread.id + "/messages",
+      payload: { body: "also the copy" },
+    })
+    expect(followup.statusCode).toBe(201)
+    const updated = ThreadSchema.parse(followup.json())
+    const fresh = updated.messages[updated.messages.length - 1]
+    expect(fresh?.kind).toBe("thinking")
+
+    const secondIndex = await waitForDuty(
+      (duty) => duty.lane === "reviewer" && duty.targets[0]?.messageId === fresh?.id,
+    )
+    expect(recordedDuty(secondIndex).threads.map((entry) => entry.id)).toEqual([thread.id])
+    resolveDuty(secondIndex)
+    await waitFor(async () => {
+      const view = await laneView(created.id)
+      const messages = view.threads[0]?.messages ?? []
+      return messages[messages.length - 1]?.body === "reply:" + (fresh?.id ?? "")
+    })
+  })
+
+  it("iterates with a worker: dispatches the batch with seed, then publishes the document", async () => {
+    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>", { host: "pi", sessionId: "s-d" })
+    await waitForBound(created.id)
+
+    const thread = await createLaneThread(created.id, "add a footer")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane iterate")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane iterate")
+    const duty = recordedDuty(workIndex)
+    expect(duty.version).toBe("v1")
+    expect(duty.batchThreadIds).toEqual([thread.id])
+    expect(duty.threads.map((entry) => entry.id)).toEqual([thread.id])
+    expect(duty.targets).toEqual([])
+    expect(duty.promptTemplate).toBe(DEFAULT_WORKER_PROMPT)
+    expect(duty.htmlPath).toBe(join(laneHome, "artifacts", created.id, "v1", "index.html"))
+    const workerSeed = recorded.seeds.find((seed) => seed !== undefined)
+    expect(workerSeed).toEqual({ html: "<p>lane-d v1</p>", version: "v1" })
+
+    resolveDuty(workIndex)
+    await waitFor(async () => {
+      const view = await laneView(created.id)
+      return view.artifactStatus === "review" && view.current === "v2" && view.versions[1]?.note === "redline-note"
+    })
+    const document = await laneApp.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
+    expect(document.body).toContain("fake next")
+    await waitFor(() => recorded.notes.some((note) => note.text === "published v2 of Lane iterate — redline-note"))
+  })
+
+  it("skips onDocument when the artifact is no longer iterating", async () => {
+    const created = await createLaneArtifact("Lane stale duty", "<p>lane-f v1</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "rework it")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane stale duty")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane stale duty")
+
+    // The human path wins while the duty flies: fallback publish, then approve.
+    const published = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions",
+      payload: { html: "<p>lane-f v2</p>", note: "manual" },
+    })
+    expect(published.statusCode).toBe(201)
+    const approved = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions/v2/approve",
+      payload: {},
+    })
+    expect(approved.statusCode).toBe(200)
+
+    resolveDuty(workIndex)
+    // workerRunning flips false only after onDocument ran, so this proves the skip.
+    await waitFor(() => workerRuntime.current?.presence(created.id).workerRunning === false)
+    const view = await laneView(created.id)
+    expect(view.current).toBe("v2")
+    expect(view.versions).toHaveLength(2)
+    expect(recorded.notes).toHaveLength(0)
+  })
+
+  it("approve unbinds the lanes and notifies origin", async () => {
+    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", { host: "pi", sessionId: "s-g" })
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "polish")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane approve")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane approve")
+    resolveDuty(workIndex)
+    await waitFor(async () => (await laneView(created.id)).current === "v2")
+
+    expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(true)
+    expect(workerRuntime.current?.presence(created.id).workerBound).toBe(true)
+
+    const approved = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions/v2/approve",
+      payload: {},
+    })
+    expect(approved.statusCode).toBe(200)
+    await waitFor(
+      () =>
+        workerRuntime.current?.presence(created.id).reviewerBound === false &&
+        workerRuntime.current?.presence(created.id).workerBound === false,
+    )
+    await waitFor(() => recorded.notes.some((note) => note.text === "v2 approved — done for now"))
+    expect(recorded.notes.find((note) => note.text === "v2 approved — done for now")?.origin).toEqual({
+      host: "pi",
+      sessionId: "s-g",
+    })
+  })
+
+  it("does not notify when the artifact has no origin", async () => {
+    const created = await createLaneArtifact("Lane no origin", "<p>lane-h</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "anonymous comment")
+    const dutyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane no origin")
+    resolveDuty(dutyIndex)
+    await waitFor(async () => (await laneView(created.id)).threads[0]?.messages[1]?.kind === "text")
+    // origin is absent: notifyOrigin early-returns before any adapter is
+    // consulted, so no note can appear no matter how the duty settles.
+    expect(recorded.notes).toHaveLength(0)
+  })
+
+  it("marks placeholders unavailable when the reviewer lane fails", async () => {
+    const created = await createLaneArtifact("Lane failure", "<p>lane-i</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "this will fail")
+    const dutyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane failure")
+    rejectDuty(dutyIndex, new Error("agent exploded"))
+
+    await waitFor(async () => {
+      const view = await laneView(created.id)
+      return view.threads[0]?.messages[1]?.body === "reviewer unavailable: agent exploded"
+    })
+    expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
   })
 })

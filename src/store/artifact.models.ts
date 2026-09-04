@@ -117,6 +117,16 @@ export const ArtifactIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}$/)
 
 export type ArtifactId = z.infer<typeof ArtifactIdSchema>
 
+// Where the create request came from (host plugin session). Stored on the
+// artifact so origin notifications can find their way home.
+export const OriginRefSchema = z.object({
+  host: z.string().min(1),
+  sessionId: z.string().min(1),
+  serverUrl: z.string().optional(),
+})
+
+export type OriginRef = z.infer<typeof OriginRefSchema>
+
 export const ArtifactMetaSchema = z.object({
   id: ArtifactIdSchema,
   title: z.string().min(1).max(200),
@@ -129,6 +139,7 @@ export const ArtifactMetaSchema = z.object({
   iteratedAt: IsoTimestampSchema.optional(),
   current: VersionSchema,
   versions: z.array(ArtifactVersionSchema).min(1),
+  origin: OriginRefSchema.optional(),
 })
 
 export type ArtifactMeta = z.infer<typeof ArtifactMetaSchema>
