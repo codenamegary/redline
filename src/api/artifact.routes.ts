@@ -18,6 +18,7 @@ import {
 } from "../store/artifact.store"
 import { storeError } from "../store/errors"
 import { ArtifactMeta } from "../store/artifact.models"
+import { createDispatcher, workerRuntime } from "../worker/dispatcher"
 import {
   AddVersionBodySchema,
   ApproveParamsSchema,
@@ -39,7 +40,10 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 // button — the two places that must be honest about the agent listening.
 const waitingAgents = new Map<string, number>()
 
-const isAgentAttached = (id: string): boolean => (waitingAgents.get(id) ?? 0) > 0
+const isAgentAttached = (id: string): boolean =>
+  (waitingAgents.get(id) ?? 0) > 0 ||
+  (workerRuntime.current?.presence(id).reviewerBound ?? false) ||
+  (workerRuntime.current?.presence(id).workerRunning ?? false)
 
 export type ArtifactSummary = {
   id: string
@@ -70,6 +74,19 @@ const summarizeArtifact = async (store: Store, origin: string, meta: ArtifactMet
 }
 
 export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
+  // Server-owned agent lanes. The adapter registry stays empty until the
+  // ACP adapter lands, so every lane reads as unconfigured and presence
+  // answers stay inert. Handlers are wired in the worker-agent loop phase.
+  workerRuntime.current = createDispatcher({
+    home: store.home,
+    adapters: {},
+    handlers: {
+      onReplies: () => {},
+      onDocument: () => {},
+      onError: () => {},
+    },
+  })
+
   app.get("/api/v1/health", async () => ({ ok: true, service: "redline", home: store.home }))
 
   app.get("/api/v1/artifacts", async (request) => {
