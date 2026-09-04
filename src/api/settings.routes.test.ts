@@ -8,15 +8,27 @@ import { buildServer } from "../server"
 import { openStore } from "../store/artifact.store"
 import { RedlineSettings, RedlineSettingsSchema } from "../store/settings.models"
 import { settingsPath } from "../store/settings.store"
+import { AcpProbe } from "../worker/probe"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
 
 const homes: string[] = []
 const apps: FastifyInstance[] = []
 
+// ACP lanes probe with a real handshake now; inject a deterministic fake so
+// argv fixtures like ["true"] keep meaning "passes".
+const fakeProbeAcp: AcpProbe = async (argv) => {
+  const command = argv[0] ?? ""
+  if (command === "true") return { ok: true }
+  if (command === "redline-no-such-binary-9x8y") {
+    return { ok: false, detail: "command not found: " + command }
+  }
+  return { ok: false, detail: "exited with code 1" }
+}
+
 const makeApp = (): { app: FastifyInstance; home: string } => {
   const home = mkdtempSync(join(tmpdir(), "redline-settings-"))
   homes.push(home)
-  const app = buildServer({ store: openStore(home), loggerLevel: "error" })
+  const app = buildServer({ store: openStore(home), loggerLevel: "error", probeAcp: fakeProbeAcp })
   apps.push(app)
   return { app, home }
 }

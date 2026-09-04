@@ -23,8 +23,8 @@ export type DispatcherOptions = {
   // Settings are read through this home at call time, so config flips land
   // without a restart.
   home: string
-  // Adapter registry. Phase 2 registers only test adapters; the real ACP
-  // adapter arrives in the next phase.
+  // Adapter registry. artifact.routes registers the real ACP adapter;
+  // tests register fakes. Lanes resolve the adapter again at duty time.
   adapters: DispatcherAdapters
   handlers: DispatcherHandlers
 }

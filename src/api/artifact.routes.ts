@@ -18,6 +18,8 @@ import {
 } from "../store/artifact.store"
 import { storeError } from "../store/errors"
 import { ArtifactMeta } from "../store/artifact.models"
+import { readEffectiveSettings } from "../store/settings.store"
+import { createAcpAdapter } from "../worker/acp.adapter"
 import { createDispatcher, workerRuntime } from "../worker/dispatcher"
 import {
   AddVersionBodySchema,
@@ -74,12 +76,17 @@ const summarizeArtifact = async (store: Store, origin: string, meta: ArtifactMet
 }
 
 export const registerApiRoutes = (app: FastifyInstance, store: Store): void => {
-  // Server-owned agent lanes. The adapter registry stays empty until the
-  // ACP adapter lands, so every lane reads as unconfigured and presence
-  // answers stay inert. Handlers are wired in the worker-agent loop phase.
+  // Server-owned agent lanes. The real ACP adapter reads lane config from
+  // live settings at duty time; handlers stay no-op stubs until the
+  // worker-agent loop phase wires them. Nothing calls attachReviewer or
+  // attachWorker yet, so presence stays false under default settings.
   workerRuntime.current = createDispatcher({
     home: store.home,
-    adapters: {},
+    adapters: {
+      acp: createAcpAdapter({
+        getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
+      }),
+    },
     handlers: {
       onReplies: () => {},
       onDocument: () => {},

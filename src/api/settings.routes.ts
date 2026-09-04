@@ -9,7 +9,7 @@ import {
   readEffectiveSettings,
   saveSettings,
 } from "../store/settings.store"
-import { probeLaneCommand } from "../worker/probe"
+import { AcpProbe, probeAcpHandshake, probeLaneCommand } from "../worker/probe"
 
 const ProbeBodySchema = z.object({
   lane: z.enum(["reviewer", "worker"]),
@@ -17,7 +17,18 @@ const ProbeBodySchema = z.object({
   acpCommand: z.array(z.string().min(1)),
 })
 
-export const registerSettingsRoutes = (app: FastifyInstance, home: string): void => {
+export type SettingsRoutesOptions = {
+  // Test seam: overrides the ACP handshake probe (defaults to the real one).
+  probeAcp?: AcpProbe
+}
+
+export const registerSettingsRoutes = (
+  app: FastifyInstance,
+  home: string,
+  options?: SettingsRoutesOptions,
+): void => {
+  const probeAcp = options?.probeAcp ?? probeAcpHandshake
+
   app.get("/api/v1/settings", async () => readEffectiveSettings(home))
 
   // The PUT probes every lane that will actually spawn something, then
@@ -27,7 +38,10 @@ export const registerSettingsRoutes = (app: FastifyInstance, home: string): void
     const body = RedlineSettingsSchema.parse(request.body)
     for (const lane of [body.reviewer, body.worker]) {
       if (lane.adapter === "none") continue
-      const probe = await probeLaneCommand(lane.acpCommand)
+      const probe =
+        lane.adapter === "acp"
+          ? await probeAcp(lane.acpCommand)
+          : await probeLaneCommand(lane.acpCommand)
       if (!probe.ok) return sendProblem(reply, 400, "Probe failed", probe.detail)
     }
     return saveSettings(home, body)
@@ -35,7 +49,10 @@ export const registerSettingsRoutes = (app: FastifyInstance, home: string): void
 
   app.post("/api/v1/settings/probe", async (request, reply) => {
     const body = ProbeBodySchema.parse(request.body)
-    const probe = await probeLaneCommand(body.acpCommand)
+    const probe =
+      body.adapter === "acp"
+        ? await probeAcp(body.acpCommand)
+        : await probeLaneCommand(body.acpCommand)
     if (!probe.ok) return sendProblem(reply, 422, "Probe failed", probe.detail)
     return { ok: true }
   })

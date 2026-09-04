@@ -7,11 +7,14 @@ import { sendProblem } from "./api/problem.details"
 import { registerArtifactFiles } from "./http/static.handlers"
 import { isStoreError } from "./store/errors"
 import { Store } from "./store/artifact.store"
+import { AcpProbe } from "./worker/probe"
 import { registerUiRoutes } from "./ui/ui.routes"
 
 export type ServerOptions = {
   store: Store
   loggerLevel?: string
+  // Test seam: overrides the ACP handshake probe in the settings routes.
+  probeAcp?: AcpProbe
 }
 
 const errorStatus = (error: unknown): number | undefined => {
@@ -51,7 +54,7 @@ export const buildServer = (options: ServerOptions): FastifyInstance => {
   })
 
   registerApiRoutes(app, options.store)
-  registerSettingsRoutes(app, options.store.home)
+  registerSettingsRoutes(app, options.store.home, { probeAcp: options.probeAcp })
   registerArtifactFiles(app, options.store)
   registerUiRoutes(app, options.store)
 
