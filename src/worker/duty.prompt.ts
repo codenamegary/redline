@@ -1,9 +1,7 @@
-import { stat } from "node:fs/promises"
-
 import { z } from "zod"
 
 import { Thread, ThreadMessage } from "../store/artifact.models"
-import { DutyInput, DutyResult, SeedSpec, ThreadRef } from "./host.adapter"
+import { DutyInput, DutyResult, Lane, SeedSpec, ThreadRef } from "./host.adapter"
 
 export type TemplateVars = {
   title: string
@@ -103,26 +101,24 @@ export const buildWorkPrompt = (input: DutyInput): string =>
     batch: input.batchThreadIds ?? [],
   }) + workContract
 
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
-  }
+// First duty on a worker lane carries the document inline: spawned agents
+// get ACP permission requests auto-denied, so a "read the file on disk"
+// pointer is typically unreadable and the spec allows shipping the document
+// in the first message instead. An empty seed (file unreadable at enqueue
+// time) inlines nothing. Reviewer lanes never get HTML. Callers own the
+// once-per-session tracking via their seeded flag.
+export const buildSeedContext = (input: DutyInput, seed?: SeedSpec): string => {
+  if (seed === undefined || input.lane !== "worker" || seed.html.length === 0) return ""
+  return "Current document (" + seed.version + "), complete single-file HTML:\n\n" + seed.html
 }
 
-// First duty on a worker lane carries the document. A htmlPath that exists
-// on disk is passed as a pointer (never inlined); otherwise the seed html
-// ships inline. Reviewer lanes never get HTML. Callers own the once-per-
-// session tracking via their seeded flag.
-export const buildSeedContext = async (input: DutyInput, seed?: SeedSpec): Promise<string> => {
-  if (seed === undefined || input.lane !== "worker") return ""
-  if (input.htmlPath !== undefined && (await fileExists(input.htmlPath))) {
-    return "The current document is on disk at " + input.htmlPath + ". Read it first."
-  }
-  return "Current document (v" + seed.version + "):\n\n```html\n" + seed.html + "\n```"
-}
+// One prompt builder and one parser per lane, shared by every adapter so
+// the reviewer/worker switch lives in exactly one place.
+export const buildLanePrompt = (input: DutyInput): string =>
+  input.lane === "reviewer" ? buildReplyPrompt(input) : buildWorkPrompt(input)
+
+export const parseLaneResult = (lane: Lane, raw: string): DutyResult =>
+  lane === "reviewer" ? parseReplyResult(raw) : parseWorkResult(raw)
 
 const ReplyItemsSchema = z.array(
   z.object({

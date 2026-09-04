@@ -203,6 +203,26 @@ describe("artifact api", () => {
     expect(response.json()).toMatchObject({ type: "about:blank", status: 404 })
   })
 
+  it("reports the worker debug view with unconfigured lanes and 404s unknown ids", async () => {
+    const created = await createArtifact("Worker debug", "<p>dbg</p>")
+    const response = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/worker" })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      artifactId: created.id,
+      attached: false,
+      reviewer: { adapter: "none", bound: false },
+      worker: { adapter: "none", running: false, bound: false },
+      origin: null,
+    })
+
+    const missing = await app.inject({
+      method: "GET",
+      url: "/api/v1/artifacts/2099-01-01-000000-nope/worker",
+    })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.json()).toMatchObject({ type: "about:blank", status: 404 })
+  })
+
   it("collects feedback threads, replies, and resolution", async () => {
     const created = await createArtifact("Feedback test", "<h1 id=\"hero\">Hero</h1>")
 
@@ -590,6 +610,23 @@ describe("agent lane dispatch", () => {
   const laneStore = openStore(laneHome)
   let laneApp: FastifyInstance
 
+  // Lane settings live on disk and are read at call time, so tests can flip
+  // a lane mid-suite and restore this baseline afterwards.
+  const laneSettings = (overrides?: { reviewer?: string; worker?: string }): string =>
+    JSON.stringify({
+      reviewer: {
+        adapter: overrides?.reviewer ?? "acp",
+        preset: "custom",
+        acpCommand: ["fake-agent"],
+      },
+      worker: {
+        adapter: overrides?.worker ?? "acp",
+        preset: "custom",
+        acpCommand: ["fake-agent"],
+      },
+      prompts: { reviewer: "", worker: "" },
+    })
+
   // Duty bookkeeping. runDuty parks every duty on a deferred the test
   // resolves, so store mutations happen deterministically.
   const recorded: {
@@ -637,14 +674,7 @@ describe("agent lane dispatch", () => {
   }
 
   beforeAll(async () => {
-    writeFileSync(
-      join(laneHome, "settings.json"),
-      JSON.stringify({
-        reviewer: { adapter: "acp", preset: "custom", acpCommand: ["fake-agent"] },
-        worker: { adapter: "acp", preset: "custom", acpCommand: ["fake-agent"] },
-        prompts: { reviewer: "", worker: "" },
-      }),
-    )
+    writeFileSync(join(laneHome, "settings.json"), laneSettings())
     laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: { acp: fakeAcp } })
   })
 
@@ -662,8 +692,10 @@ describe("agent lane dispatch", () => {
 
   const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
+  // 5s: the bind-wait window alone is 2s, so failure-path conditions resolve
+  // close to that deadline.
   const waitFor = async (check: () => boolean | Promise<boolean>): Promise<void> => {
-    const deadline = Date.now() + 2000
+    const deadline = Date.now() + 5000
     for (;;) {
       if (await check()) return
       if (Date.now() >= deadline) throw new Error("condition not met within 2s")
@@ -771,7 +803,10 @@ describe("agent lane dispatch", () => {
   })
 
   it("dispatches a reviewer duty on a comment and patches the placeholder with the reply", async () => {
-    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>", { host: "pi", sessionId: "s-b" })
+    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>", {
+      host: "opencode",
+      sessionId: "s-b",
+    })
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "the hero is huge")
@@ -796,7 +831,7 @@ describe("agent lane dispatch", () => {
     })
     await waitFor(() => recorded.notes.length === 1)
     expect(recorded.notes[0]?.text).toBe("replied to 1 thread(s) on Lane reply (v1)")
-    expect(recorded.notes[0]?.origin).toEqual({ host: "pi", sessionId: "s-b" })
+    expect(recorded.notes[0]?.origin).toEqual({ host: "opencode", sessionId: "s-b" })
   })
 
   it("dispatches again with a fresh target on a follow-up comment", async () => {
@@ -831,7 +866,10 @@ describe("agent lane dispatch", () => {
   })
 
   it("iterates with a worker: dispatches the batch with seed, then publishes the document", async () => {
-    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>", { host: "pi", sessionId: "s-d" })
+    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>", {
+      host: "opencode",
+      sessionId: "s-d",
+    })
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "add a footer")
@@ -900,7 +938,10 @@ describe("agent lane dispatch", () => {
   })
 
   it("approve unbinds the lanes and notifies origin", async () => {
-    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", { host: "pi", sessionId: "s-g" })
+    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", {
+      host: "opencode",
+      sessionId: "s-g",
+    })
     await waitForBound(created.id)
 
     await createLaneThread(created.id, "polish")
@@ -928,7 +969,7 @@ describe("agent lane dispatch", () => {
     )
     await waitFor(() => recorded.notes.some((note) => note.text === "v2 approved — done for now"))
     expect(recorded.notes.find((note) => note.text === "v2 approved — done for now")?.origin).toEqual({
-      host: "pi",
+      host: "opencode",
       sessionId: "s-g",
     })
   })
@@ -959,5 +1000,76 @@ describe("agent lane dispatch", () => {
       return view.threads[0]?.messages[1]?.body === "reviewer unavailable: agent exploded"
     })
     expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
+  })
+
+  it("reports the worker debug view for configured lanes", async () => {
+    const created = await createLaneArtifact("Lane debug", "<p>lane-j</p>", {
+      host: "opencode",
+      sessionId: "s-j",
+    })
+    await waitForBound(created.id)
+
+    const response = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/worker" })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toMatchObject({
+      artifactId: created.id,
+      attached: true,
+      reviewer: { adapter: "acp", bound: true },
+      worker: { adapter: "acp", running: false, bound: false },
+      origin: { host: "opencode", sessionId: "s-j" },
+    })
+  })
+
+  it("patches outstanding placeholders when the reviewer bind never lands", async () => {
+    // Point the reviewer at an adapter id absent from the registry: attach
+    // never binds, so a comment's dispatch waits out the bind window and
+    // must fail the lane instead of leaving the placeholder dangling.
+    writeFileSync(join(laneHome, "settings.json"), laneSettings({ reviewer: "opencode-sdk" }))
+    try {
+      const created = await createLaneArtifact("Lane bind timeout", "<p>lane-k</p>")
+      expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
+
+      const after = new Date(Date.now() + 80).toISOString()
+      const poller = laneApp.inject({
+        method: "GET",
+        url: "/api/v1/artifacts/" + created.id + "/feedback?wait=30&after=" + encodeURIComponent(after),
+      })
+      await sleep(300)
+      // The waiting long-poll counts as attached, so the comment gets a
+      // placeholder even though the reviewer lane will never bind.
+      const thread = await createLaneThread(created.id, "nobody will answer")
+      expect(thread.messages).toHaveLength(2)
+      expect(thread.messages[1]?.kind).toBe("thinking")
+
+      // The comment itself wakes the poller, so wait on the patch directly;
+      // the bind window (2s) must expire and fail the lane.
+      await waitFor(async () => {
+        const view = await laneView(created.id)
+        return view.threads[0]?.messages[1]?.body === "reviewer unavailable: reviewer lane failed to start"
+      })
+      await poller
+    } finally {
+      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+    }
+  })
+
+  it("answers the iterate route with a distinct message when the worker lane fails to start", async () => {
+    // Worker adapter id absent from the registry: the bind window expires
+    // and the route fails the lane with its own conflict copy.
+    writeFileSync(join(laneHome, "settings.json"), laneSettings({ worker: "opencode-sdk" }))
+    try {
+      const created = await createLaneArtifact("Lane iterate fail", "<p>lane-l</p>")
+      await createLaneThread(created.id, "will not dispatch")
+
+      const response = await laneApp.inject({
+        method: "POST",
+        url: "/api/v1/artifacts/" + created.id + "/iterations",
+        payload: {},
+      })
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toMatchObject({ status: 409, detail: "worker lane failed to start" })
+    } finally {
+      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+    }
   })
 })

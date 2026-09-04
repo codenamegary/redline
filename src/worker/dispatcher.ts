@@ -10,6 +10,7 @@ import {
   OriginRef,
   SeedSpec,
 } from "./host.adapter"
+import { errorDetail } from "./util"
 
 export type DispatcherAdapters = Partial<Record<AdapterId, HostAdapter>>
 
@@ -68,8 +69,6 @@ type ArtifactRuntime = {
 
 type CachedSession = { adapter: HostAdapter; session: AgentSession }
 
-const errorDetail = (error: unknown): string => (error instanceof Error ? error.message : String(error))
-
 const canNotify = (adapter: HostAdapter): boolean =>
   adapter.canNotifyOrigin() && adapter.notifyOrigin !== undefined
 
@@ -125,7 +124,9 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
 
   // A lane keeps one host session per artifact. Seedless duties (reviewer)
   // reuse it; seeded duties (worker) re-ensure so the adapter can pick up
-  // the fresh document.
+  // the fresh document. Replacing a cached session (new Iterate, adapter
+  // flipped) discards the old one first: a cached ACP session is a live
+  // child process, and overwriting the slot would leak it.
   const ensureSession = async (
     artifactId: string,
     lane: Lane,
@@ -134,6 +135,7 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
   ): Promise<AgentSession> => {
     const cached = cachedSession(artifactId, lane)
     if (seed === undefined && cached !== undefined && cached.adapter === adapter) return cached.session
+    if (cached !== undefined) discardSession(artifactId, lane)
     const session = await adapter.ensureSession(lane, artifactId, seed)
     cacheSession(artifactId, lane, { adapter, session })
     return session
@@ -204,6 +206,10 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
         return
       }
       await handlers.onDocument(artifactId, result)
+      // Each Iterate is a fresh worker: once the document has landed the
+      // host session is done, so tear it down instead of caching a live
+      // child process until the next Iterate or approve.
+      discardSession(artifactId, "worker")
     } catch (error) {
       await fail(artifactId, "worker", errorDetail(error))
     } finally {
@@ -253,6 +259,9 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
 
     notifyOrigin: async (artifactId, origin, text) => {
       if (origin === undefined) return
+      // prompt_async is OpenCode-only: a pi origin session id would be
+      // POSTed to an OpenCode server, so other hosts never notify.
+      if (origin.host !== "opencode") return
       const settings = await readEffectiveSettings(home)
       if (!settings.notifyOrigin) return
       const workerAdapter = adapterFor("worker", settings)

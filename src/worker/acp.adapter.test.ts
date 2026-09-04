@@ -144,7 +144,7 @@ describe("acp adapter", () => {
     await adapter.discard(session)
   })
 
-  it("runs a worker duty that points at the on-disk document", async () => {
+  it("inlines the seed html even when an htmlPath exists on disk", async () => {
     const workspace = makeWorkspace()
     const htmlPath = join(workspace, "index.html")
     writeFileSync(htmlPath, "<html><body>v1</body></html>", "utf8")
@@ -154,13 +154,14 @@ describe("acp adapter", () => {
     const session = await adapter.ensureSession("worker", "a1", seed)
 
     const result = await adapter.runDuty(session, workerInput({ htmlPath }))
-    // The note marker proves the prompt carried the path, not inline html.
-    expect(result.kind === "document" && result.note).toBe("note from disk prompt")
+    // The note marker proves the document shipped inline: spawned agents get
+    // permission requests denied, so a disk pointer would be unreadable.
+    expect(result.kind === "document" && result.note).toBe("note from inline prompt")
     expect(result.kind === "document" && result.html).toContain("fake v-next")
     await adapter.discard(session)
   })
 
-  it("inlines the seed html when no readable htmlPath exists, once per session", async () => {
+  it("inlines the seed html without a path, once per session", async () => {
     const workspace = makeWorkspace()
     const { argv } = fixtureCommand(workspace)
     const adapter = makeAdapter({ worker: argv })

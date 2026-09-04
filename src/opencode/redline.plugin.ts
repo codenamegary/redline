@@ -8,7 +8,11 @@ import { fileURLToPath } from "node:url"
 import { Plugin, tool } from "@opencode-ai/plugin"
 import { z } from "zod"
 
-import { buildCreateResponseText, buildUpdateResponseText, ResponseSummary } from "../agent.response"
+import {
+  asResponseSummary,
+  buildCreateResponseText,
+  buildUpdateResponseText,
+} from "../agent.response"
 
 // opencode plugin for the redline review server. Mirrors src/pi/redline.extension.ts:
 // same five tool names, same HTTP API (see skills/redline/SKILL.md). The review loop is
@@ -54,16 +58,6 @@ const SummarySchema = z.object({
 })
 
 type Summary = z.infer<typeof SummarySchema>
-
-// The helpers read only the fields they format; this keeps the plugin's
-// parsed summary and the shared copy in sync at the type level.
-const asResponseSummary = (summary: Summary): ResponseSummary => ({
-  id: summary.id,
-  current: summary.current,
-  status: summary.status,
-  reviewUrl: summary.reviewUrl,
-  reviewer: summary.reviewer,
-})
 
 const ThreadSchema = z.object({
   id: z.string(),

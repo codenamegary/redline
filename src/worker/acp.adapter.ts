@@ -2,14 +2,9 @@ import { spawn } from "node:child_process"
 
 import { hasErrorCode } from "../store/errors"
 import { LaneConfig } from "../store/settings.models"
-import {
-  buildReplyPrompt,
-  buildSeedContext,
-  buildWorkPrompt,
-  parseReplyResult,
-  parseWorkResult,
-} from "./duty.prompt"
+import { buildLanePrompt, buildSeedContext, parseLaneResult } from "./duty.prompt"
 import { AgentSession, DutyInput, DutyResult, HostAdapter, Lane, SeedSpec } from "./host.adapter"
+import { isRecord } from "./util"
 
 const defaultTimeoutSeconds = 300
 // Handshakes (initialize + session/new) are fast ops; a fixed deadline keeps
@@ -27,16 +22,12 @@ export type AcpAdapterOptions = {
 
 type Pending = { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void }
 
-type Connection = {
-  request: (method: string, params: unknown) => Promise<unknown>
+type Connection = {  request: (method: string, params: unknown) => Promise<unknown>
   resetChunks: () => void
   takeChunks: () => string
   kill: () => void
   terminate: () => Promise<void>
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
 
 const withTimeout = async <T>(
   promise: Promise<T>,
@@ -323,7 +314,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     const state = sessions.get(session.hostSessionId)
     if (state === undefined) throw new Error("acp session is gone")
     const seedPrefix = await seedContext(session.hostSessionId, input)
-    const base = input.lane === "reviewer" ? buildReplyPrompt(input) : buildWorkPrompt(input)
+    const base = buildLanePrompt(input)
     const prompt = seedPrefix.length > 0 ? seedPrefix + "\n\n" + base : base
     state.connection.resetChunks()
     await withTimeout(
@@ -336,7 +327,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
       () => dropSession(session.hostSessionId),
     )
     const raw = state.connection.takeChunks()
-    return input.lane === "reviewer" ? parseReplyResult(raw) : parseWorkResult(raw)
+    return parseLaneResult(input.lane, raw)
   }
 
   return {

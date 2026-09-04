@@ -1,11 +1,5 @@
 import { LaneConfig } from "../store/settings.models"
-import {
-  buildReplyPrompt,
-  buildSeedContext,
-  buildWorkPrompt,
-  parseReplyResult,
-  parseWorkResult,
-} from "./duty.prompt"
+import { buildLanePrompt, buildSeedContext, parseLaneResult } from "./duty.prompt"
 import {
   AgentSession,
   DutyInput,
@@ -15,6 +9,7 @@ import {
   OriginRef,
   SeedSpec,
 } from "./host.adapter"
+import { errorDetail, isRecord } from "./util"
 
 export type OpenCodeSdkAdapterOptions = {
   getLaneConfig: (lane: Lane) => LaneConfig | Promise<LaneConfig>
@@ -22,17 +17,6 @@ export type OpenCodeSdkAdapterOptions = {
 }
 
 type SessionState = { lane: Lane; artifactId: string; seed?: SeedSpec; seeded: boolean }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
-// fetch failures wrap the underlying cause (ECONNREFUSED etc.); surface it
-// so a dead or misconfigured server reads clearly in dispatcher error lines.
-const errorDetail = (error: unknown): string => {
-  if (!(error instanceof Error)) return String(error)
-  const cause = (error as Error & { cause?: unknown }).cause
-  return cause instanceof Error ? error.message + ": " + cause.message : error.message
-}
 
 const requestJson = async (url: string, init: RequestInit): Promise<unknown> => {
   let response: Response
@@ -102,8 +86,8 @@ export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): Ho
     // session, reviewer lanes never see it.
     const alreadySeeded = state.seeded
     state.seeded = true
-    const seedPrefix = alreadySeeded ? "" : await buildSeedContext(input, state.seed)
-    const base = input.lane === "reviewer" ? buildReplyPrompt(input) : buildWorkPrompt(input)
+    const seedPrefix = alreadySeeded ? "" : buildSeedContext(input, state.seed)
+    const base = buildLanePrompt(input)
     const prompt = seedPrefix.length > 0 ? seedPrefix + "\n\n" + base : base
     const [config, serverUrl] = await Promise.all([
       options.getLaneConfig(input.lane),
@@ -116,7 +100,7 @@ export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): Ho
       messageInit(body),
     )
     const raw = responseText(response)
-    return input.lane === "reviewer" ? parseReplyResult(raw) : parseWorkResult(raw)
+    return parseLaneResult(input.lane, raw)
   }
 
   return {

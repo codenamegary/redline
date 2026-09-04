@@ -3,13 +3,16 @@ import { describe, expect, it } from "bun:test"
 import { Thread } from "../store/artifact.models"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "./prompts"
 import {
+  buildLanePrompt,
+  buildSeedContext,
   buildReplyPrompt,
   buildWorkPrompt,
+  parseLaneResult,
   parseReplyResult,
   parseWorkResult,
   renderTemplate,
 } from "./duty.prompt"
-import { DutyInput } from "./host.adapter"
+import { DutyInput, SeedSpec } from "./host.adapter"
 
 const iso = "2026-01-01T00:00:00.000Z"
 
@@ -121,6 +124,44 @@ describe("buildWorkPrompt", () => {
     expect(prompt).toContain("Batch thread ids: t1")
     expect(prompt).toContain("<!-- redline-note: <one-sentence what changed> -->")
     expect(prompt).toContain("No markdown fences.")
+  })
+})
+
+describe("buildLanePrompt", () => {
+  it("picks the contract by lane and parseLaneResult reads it back", () => {
+    const replyPrompt = buildLanePrompt(reviewerInput())
+    expect(replyPrompt).toContain("Your ENTIRE output must be exactly one JSON array")
+    const workPrompt = buildLanePrompt(workerInput())
+    expect(workPrompt).toContain("Output contract (a machine parses your document)")
+
+    const replies = parseLaneResult("reviewer", '[{"threadId":"t1","messageId":"m2","body":"ok"}]')
+    expect(replies).toEqual({
+      kind: "replies",
+      items: [{ threadId: "t1", messageId: "m2", body: "ok" }],
+    })
+    const doc = parseLaneResult("worker", "<html><body>x</body></html>")
+    expect(doc).toEqual({ kind: "document", html: "<html><body>x</body></html>", note: "" })
+  })
+})
+
+describe("buildSeedContext", () => {
+  it("always inlines the document with an intro line, no fences and no disk pointer", () => {
+    const seed: SeedSpec = { html: "<html><body>v1</body></html>", version: "v1" }
+    const context = buildSeedContext(workerInput({ htmlPath: "/tmp/a/v1/index.html" }), seed)
+    expect(context).toBe(
+      "Current document (v1), complete single-file HTML:\n\n<html><body>v1</body></html>",
+    )
+    expect(context).not.toContain("```")
+    expect(context).not.toContain("on disk")
+    expect(context).not.toContain("htmlPath")
+  })
+
+  it("returns empty for reviewer lanes, missing seeds, and empty seeds", () => {
+    const seed: SeedSpec = { html: "<p>x</p>", version: "v1" }
+    expect(buildSeedContext(reviewerInput(), seed)).toBe("")
+    expect(buildSeedContext(workerInput())).toBe("")
+    // Empty seed: the file was unreadable when the route enqueued the duty.
+    expect(buildSeedContext(workerInput(), { html: "", version: "v1" })).toBe("")
   })
 })
 

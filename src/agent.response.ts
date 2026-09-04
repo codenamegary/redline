@@ -17,6 +17,17 @@ export type ResponseSummary = {
 const hasServerReviewer = (summary: ResponseSummary): boolean =>
   summary.reviewer !== undefined && summary.reviewer !== "none"
 
+// The plugins' parsed summaries carry extra fields; the copy builders read
+// only the fields they format, so both feed their summary through this
+// projection to keep the parsed shape and the shared copy in sync.
+export const asResponseSummary = (summary: ResponseSummary): ResponseSummary => ({
+  id: summary.id,
+  current: summary.current,
+  status: summary.status,
+  reviewUrl: summary.reviewUrl,
+  reviewer: summary.reviewer,
+})
+
 const reviewerConfiguredLine =
   "Reviewer configured on the redline server: give the user the review URL and stop. Do not call wait_for_feedback. The server's reviewer and worker agents handle live replies and iteration duties."
 

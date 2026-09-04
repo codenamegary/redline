@@ -35,8 +35,7 @@ const repliesFrom = (prompt: string): string => {
 // The note encodes which seed mode the adapter used, so tests can assert on
 // prompt shape through the parsed document.
 const noteFor = (prompt: string): string => {
-  if (prompt.includes("Read it first")) return "note from disk prompt"
-  if (prompt.includes("```html")) return "note from inline prompt"
+  if (prompt.includes("complete single-file HTML:")) return "note from inline prompt"
   return "fake iteration note"
 }
 

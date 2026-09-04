@@ -21,7 +21,7 @@ import {
   Store,
 } from "../store/artifact.store"
 import { storeError } from "../store/errors"
-import { ArtifactMeta, Thread } from "../store/artifact.models"
+import { ArtifactMeta, ArtifactVersion, Thread } from "../store/artifact.models"
 import { readEffectiveSettings } from "../store/settings.store"
 import { createAcpAdapter } from "../worker/acp.adapter"
 import { createDispatcher, DispatcherAdapters, workerRuntime } from "../worker/dispatcher"
@@ -174,7 +174,13 @@ const dispatchReplies = async (store: Store, artifactId: string): Promise<void> 
     // Comment without a prior attach (settings flipped after create, server
     // restarted): re-attach and give the async bind a beat before enqueue.
     dispatcher.attachReviewer(artifactId)
-    if (!(await waitForLaneBind(artifactId, "reviewer"))) return
+    if (!(await waitForLaneBind(artifactId, "reviewer"))) {
+      // The bind never landed (adapter missing from the registry, broken
+      // command): fail the lane so outstanding thinking placeholders are
+      // patched with the unavailable text instead of dangling forever.
+      await dispatcher.fail(artifactId, "reviewer", "reviewer lane failed to start")
+      return
+    }
   }
   const meta = await readArtifactMeta(store, artifactId)
   const view = await readFeedbackView(store, artifactId)
@@ -240,6 +246,75 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
   await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
 }
 
+// Lane debug view for plugins: what is configured vs what is actually live,
+// plus the origin the artifact came from (null when created headless).
+const workerStatus = async (store: Store, id: string) => {
+  const meta = await readArtifactMeta(store, id)
+  const settings = await readEffectiveSettings(store.home)
+  const presence = workerRuntime.current?.presence(id)
+  return {
+    artifactId: id,
+    attached: isAgentAttached(id),
+    reviewer: {
+      adapter: settings.reviewer.adapter,
+      bound: presence?.reviewerBound ?? false,
+    },
+    worker: {
+      adapter: settings.worker.adapter,
+      running: presence?.workerRunning ?? false,
+      bound: presence?.workerBound ?? false,
+    },
+    origin: meta.origin ?? null,
+  }
+}
+
+// Dispatch the frozen batch to the worker lane: attach, seed the current
+// document from disk, wait for the async bind, enqueue. False when the lane
+// never bound or refused the duty (broken adapter, lost race).
+const dispatchIteration = async (
+  store: Store,
+  id: string,
+  meta: ArtifactMeta,
+  version: ArtifactVersion,
+  settings: Awaited<ReturnType<typeof readEffectiveSettings>>,
+): Promise<boolean> => {
+  const dispatcher = workerRuntime.current
+  if (settings.worker.adapter === "none" || dispatcher === undefined) return true
+  dispatcher.attachWorker(id)
+  const batchThreadIds = version.batch?.threadIds ?? []
+  const view = await readFeedbackView(store, id)
+  const batchThreads = view.threads.filter((thread) => batchThreadIds.includes(thread.id))
+  // Current version's document on disk: <home>/artifacts/<id>/<version>/index.html.
+  const htmlPath = join(artifactVersionDir(store, id, meta.current), "index.html")
+  const seed: SeedSpec = {
+    html: await readFile(htmlPath, "utf8").catch(() => ""),
+    version: meta.current,
+  }
+  const bound = await waitForLaneBind(id, "worker")
+  const enqueued = dispatcher.enqueueWork(
+    id,
+    {
+      lane: "worker",
+      promptTemplate: settings.prompts.worker,
+      brief: meta.prompt,
+      title: meta.title,
+      version: meta.current,
+      threads: batchThreads,
+      targets: [],
+      batchThreadIds: batchThreadIds,
+      htmlPath: htmlPath,
+    },
+    seed,
+  )
+  if (!bound || !enqueued) {
+    // The status already flipped, so fail the lane (notifies origin) and let
+    // the user re-Iterate or the fallback agent publish.
+    await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
+    return false
+  }
+  return true
+}
+
 export type ApiRoutesOptions = {
   // Test seam: replaces the default adapter registry (the real ACP adapter).
   adapters?: DispatcherAdapters
@@ -298,6 +373,12 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
     }
   })
 
+  // Lane debug view: configured vs live per lane, plus the artifact origin.
+  app.get("/api/v1/artifacts/:id/worker", async (request) => {
+    const { id } = IdParamsSchema.parse(request.params)
+    return workerStatus(store, id)
+  })
+
   // Submit the feedback batch: freeze open threads into a pending version
   // row and flip review -> iterating. The UI gates the button on presence,
   // but the API accepts detached iterations so they recover later. With a
@@ -308,47 +389,14 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
       throw storeError("unprocessable", "nothing to iterate: no open threads")
     }
     const settings = await readEffectiveSettings(store.home)
-    const dispatcher = workerRuntime.current
     // One work duty at a time per artifact: reject before startIteration so
     // a busy worker never leaves a stranded iterating artifact behind.
-    if (dispatcher?.presence(id).workerRunning === true) {
+    if (workerRuntime.current?.presence(id).workerRunning === true) {
       throw storeError("conflict", "worker is busy")
     }
     const { meta, version } = await startIteration(store, id)
-    if (settings.worker.adapter !== "none" && dispatcher !== undefined) {
-      dispatcher.attachWorker(id)
-      const batchThreadIds = version.batch?.threadIds ?? []
-      const view = await readFeedbackView(store, id)
-      const batchThreads = view.threads.filter((thread) => batchThreadIds.includes(thread.id))
-      // Current version's document on disk: <home>/artifacts/<id>/<version>/index.html.
-      const htmlPath = join(artifactVersionDir(store, id, meta.current), "index.html")
-      const seed: SeedSpec = {
-        html: await readFile(htmlPath, "utf8").catch(() => ""),
-        version: meta.current,
-      }
-      const bound = await waitForLaneBind(id, "worker")
-      const enqueued = dispatcher.enqueueWork(
-        id,
-        {
-          lane: "worker",
-          promptTemplate: settings.prompts.worker,
-          brief: meta.prompt,
-          title: meta.title,
-          version: meta.current,
-          threads: batchThreads,
-          targets: [],
-          batchThreadIds: batchThreadIds,
-          htmlPath: htmlPath,
-        },
-        seed,
-      )
-      // Rare: the lane never bound (broken adapter) or lost the race. The
-      // status already flipped, so fail the lane (notifies origin) and let
-      // the user re-Iterate or the fallback agent publish.
-      if (!bound || !enqueued) {
-        await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
-        throw storeError("conflict", "worker is busy")
-      }
+    if (!(await dispatchIteration(store, id, meta, version, settings))) {
+      throw storeError("conflict", "worker lane failed to start")
     }
     reply.header("location", artifactApiUrl(requestOrigin(request), id))
     return reply.status(201).send({

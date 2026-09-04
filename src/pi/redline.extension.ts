@@ -10,7 +10,11 @@ import { Type } from "typebox"
 import type { Static } from "typebox"
 import { z } from "zod"
 
-import { buildCreateResponseText, buildUpdateResponseText, ResponseSummary } from "../agent.response"
+import {
+  asResponseSummary,
+  buildCreateResponseText,
+  buildUpdateResponseText,
+} from "../agent.response"
 
 const repoUrl = process.env.REDLINE_REPO ?? "https://github.com/codenamegary/redline.git"
 
@@ -41,16 +45,6 @@ const SummarySchema = z.object({
 })
 
 type Summary = z.infer<typeof SummarySchema>
-
-// The helpers read only the fields they format; this keeps the extension's
-// parsed summary and the shared copy in sync at the type level.
-const asResponseSummary = (summary: Summary): ResponseSummary => ({
-  id: summary.id,
-  current: summary.current,
-  status: summary.status,
-  reviewUrl: summary.reviewUrl,
-  reviewer: summary.reviewer,
-})
 
 const ThreadSchema = z.object({
   id: z.string(),

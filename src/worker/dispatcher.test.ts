@@ -67,6 +67,7 @@ type FakeAdapter = {
   adapter: HostAdapter
   ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec }[]
   dutyCalls: { session: AgentSession; input: DutyInput }[]
+  discards: AgentSession[]
   notifyCalls: { origin: OriginRef; text: string }[]
   results: DutyResult[]
   failures: string[]
@@ -77,6 +78,7 @@ type FakeAdapter = {
 const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
   const ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec }[] = []
   const dutyCalls: { session: AgentSession; input: DutyInput }[] = []
+  const discards: AgentSession[] = []
   const notifyCalls: { origin: OriginRef; text: string }[] = []
   const results: DutyResult[] = []
   const failures: string[] = []
@@ -103,6 +105,9 @@ const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
       if (result !== undefined) return result
       return { kind: "replies", items: [] }
     },
+    discard: async (session) => {
+      discards.push(session)
+    },
   }
   if (withNotifyOrigin) {
     adapter.notifyOrigin = async (origin, text) => {
@@ -113,6 +118,7 @@ const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
     adapter,
     ensureCalls,
     dutyCalls,
+    discards,
     notifyCalls,
     results,
     failures,
@@ -330,9 +336,63 @@ describe("dispatcher", () => {
       workerRunning: false,
     })
     expect(dispatcher.enqueueReply("a1", dutyInput())).toBe(false)
+    // End-of-round detach discards whatever is still cached: the worker's
+    // session was already discarded when its document landed, and no
+    // reviewer duty ever cached one, so only the post-duty discard fired.
+    expect(fake.discards).toHaveLength(1)
   })
 
-  it("notifyOrigin: no-ops without origin or setting, prefers the worker adapter", async () => {
+  it("discards the worker session once the document lands (fresh worker per Iterate)", async () => {
+    const home = await makeHome()
+    const fake = fakeAdapter("acp")
+    const { events, dispatcher } = makeDispatcher(home, { acp: fake.adapter })
+    dispatcher.attachWorker("a1")
+    await waitFor(() => dispatcher.presence("a1").workerBound)
+
+    fake.results.push({ kind: "document", html: "<p>v2</p>", note: "footer" })
+    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { html: "<p>v1</p>", version: "v1" })).toBe(true)
+    await waitFor(() => events.length === 1)
+    // The session the duty flew on is discarded after onDocument delivers.
+    await waitFor(() => fake.discards.length === 1)
+    expect(fake.discards[0]?.hostSessionId).toBe(fake.dutyCalls[0]?.session.hostSessionId)
+
+    // A second Iterate gets a fresh session; the previous one was already
+    // discarded, so exactly one live session existed at any time.
+    fake.results.push({ kind: "document", html: "<p>v3</p>", note: "nav" })
+    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { html: "<p>v2</p>", version: "v2" })).toBe(true)
+    await waitFor(() => events.length === 2)
+    await waitFor(() => fake.discards.length === 2)
+    expect(fake.ensureCalls).toHaveLength(2)
+    expect(fake.discards[1]?.hostSessionId).toBe(fake.dutyCalls[1]?.session.hostSessionId)
+  })
+
+  it("discards a cached session when the lane re-ensures with a different adapter", async () => {
+    const home = await makeHome()
+    const first = fakeAdapter("acp")
+    const second = fakeAdapter("acp")
+    const adapters: DispatcherAdapters = { acp: first.adapter }
+    const { dispatcher } = makeDispatcher(home, adapters)
+    dispatcher.attachReviewer("a1")
+    await waitFor(() => dispatcher.presence("a1").reviewerBound)
+
+    first.results.push(replyResult("on it"))
+    expect(dispatcher.enqueueReply("a1", dutyInput())).toBe(true)
+    await waitFor(() => first.dutyCalls.length === 1)
+    expect(first.discards).toHaveLength(0)
+
+    // Swap the registry entry: the cached session belongs to the old adapter
+    // instance, so the next duty re-ensures and must discard the old one
+    // instead of silently overwriting it.
+    adapters.acp = second.adapter
+    second.results.push(replyResult("again"))
+    expect(dispatcher.enqueueReply("a1", dutyInput())).toBe(true)
+    await waitFor(() => second.dutyCalls.length === 1)
+    await waitFor(() => first.discards.length === 1)
+    expect(first.discards[0]?.hostSessionId).toBe(first.dutyCalls[0]?.session.hostSessionId)
+    expect(second.discards).toHaveLength(0)
+  })
+
+  it("notifyOrigin: skips non-opencode hosts, no-ops without origin or setting, prefers the worker adapter", async () => {
     const home = await makeHome((settings) => ({
       ...settings,
       reviewer: { ...settings.reviewer, adapter: "opencode-sdk" },
@@ -344,8 +404,11 @@ describe("dispatcher", () => {
       acp: workerFake.adapter,
       "opencode-sdk": reviewerFake.adapter,
     })
-    const origin: OriginRef = { host: "pi", sessionId: "s1" }
+    // prompt_async is OpenCode-only: a pi origin never notifies.
+    await dispatcher.notifyOrigin("a1", { host: "pi", sessionId: "s1" }, "iteration published")
+    expect(workerFake.notifyCalls).toEqual([])
 
+    const origin: OriginRef = { host: "opencode", sessionId: "s1" }
     await dispatcher.notifyOrigin("a1", origin, "iteration published")
     expect(workerFake.notifyCalls).toEqual([{ origin, text: "iteration published" }])
 

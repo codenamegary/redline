@@ -185,7 +185,7 @@ const promptOf = (request: RecordedRequest): string => {
 }
 
 describe("opencode sdk adapter", () => {
-  it("creates a session titled from lane and artifact and seeds from disk on the first worker duty", async () => {
+  it("creates a session titled from lane and artifact and inlines the seed on the first worker duty", async () => {
     const server = makeServer()
     server.setMessageText(workerDocText)
     const htmlPath = join(makeWorkspace(), "index.html")
@@ -201,9 +201,15 @@ describe("opencode sdk adapter", () => {
       body: { title: "redline a1 worker" },
     })
     const prompt = promptOf(recorded(messageRequests(server.requests), 0))
+    // The document ships inline even when a disk path exists: spawned agents
+    // cannot rely on file access, so the prompt never points at htmlPath.
     expect(
-      prompt.startsWith("The current document is on disk at " + htmlPath + ". Read it first.\n\n"),
+      prompt.startsWith(
+        "Current document (v1), complete single-file HTML:\n\n<html><body>seed doc</body></html>\n\n",
+      ),
     ).toBe(true)
+    expect(prompt.includes("on disk at")).toBe(false)
+    expect(prompt.includes("```")).toBe(false)
     expect(result).toEqual({
       kind: "document",
       html: "<!doctype html><html><body>new</body></html>",
@@ -211,7 +217,7 @@ describe("opencode sdk adapter", () => {
     })
   })
 
-  it("inlines the seed html when the htmlPath is absent and seeds only once per session", async () => {
+  it("inlines the seed html and seeds only once per session", async () => {
     const server = makeServer()
     server.setMessageText(workerDocText)
     const adapter = makeAdapter(server.url)
@@ -219,17 +225,15 @@ describe("opencode sdk adapter", () => {
 
     await adapter.runDuty(session, workerInput())
     const first = promptOf(recorded(messageRequests(server.requests), 0))
-    // "(vv1)": the helper prefixes the version literal with "v", matching
-    // the original acp wording the refactor preserved.
     expect(
-      first.startsWith("Current document (vv1):\n\n```html\n<html><body>seed doc</body></html>\n```\n\n"),
+      first.startsWith("Current document (v1), complete single-file HTML:\n\n<html><body>seed doc</body></html>\n\n"),
     ).toBe(true)
 
     await adapter.runDuty(session, workerInput())
     expect(messageRequests(server.requests)).toHaveLength(2)
     const second = promptOf(recorded(messageRequests(server.requests), 1))
-    expect(second.includes("Current document (vv1):")).toBe(false)
-    expect(second.includes("on disk at")).toBe(false)
+    expect(second.includes("Current document (v1):")).toBe(false)
+    expect(second.includes("complete single-file HTML:")).toBe(false)
   })
 
   it("never seeds a reviewer session and parses the reply contract", async () => {
