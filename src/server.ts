@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from "fastify"
 import { ZodError } from "zod"
 
 import { registerApiRoutes } from "./api/artifact.routes"
+import { registerSettingsRoutes } from "./api/settings.routes"
 import { sendProblem } from "./api/problem.details"
 import { registerArtifactFiles } from "./http/static.handlers"
 import { isStoreError } from "./store/errors"
@@ -50,6 +51,7 @@ export const buildServer = (options: ServerOptions): FastifyInstance => {
   })
 
   registerApiRoutes(app, options.store)
+  registerSettingsRoutes(app, options.store.home)
   registerArtifactFiles(app, options.store)
   registerUiRoutes(app, options.store)
 
