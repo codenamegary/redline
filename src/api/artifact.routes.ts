@@ -157,6 +157,28 @@ const tryPatchTarget = async (
   }
 }
 
+// Worker progress notes: appended as agent messages on the batch threads
+// that are still open. Per-thread failures are swallowed (the thread may
+// vanish mid-duty), and resolved threads stay quiet.
+const postThreadNotes = async (
+  store: Store,
+  artifactId: string,
+  threadIds: string[],
+  body: string,
+): Promise<void> => {
+  const view = await readFeedbackView(store, artifactId).catch(() => undefined)
+  if (view === undefined) return
+  const open = new Set(view.threads.filter((thread) => thread.status === "open").map((thread) => thread.id))
+  for (const threadId of threadIds) {
+    if (!open.has(threadId)) continue
+    await appendThreadMessage(store, artifactId, threadId, {
+      body: body,
+      author: "agent",
+      kind: "text",
+    }).catch(() => undefined)
+  }
+}
+
 // Every origin ping reads origin (plus title/current) from fresh meta at
 // send time, so approvals and publishes that raced the duty still read right.
 const notifyOriginLine = async (
@@ -247,6 +269,15 @@ const handleDocument = async (
   // manually): the document is stale, drop it.
   if (meta.status !== "iterating") return
   await publishIteration(store, artifactId, { html: doc.html, note: doc.note })
+  const fresh = await readArtifactMeta(store, artifactId)
+  const publishedRow = fresh.versions.find((row) => row.version === fresh.current)
+  const note = doc.note ?? ""
+  await postThreadNotes(
+    store,
+    artifactId,
+    publishedRow?.batch?.threadIds ?? [],
+    "Addressed in " + fresh.current + (note === "" ? "." : ". " + note),
+  )
   await notifyOriginLine(
     store,
     artifactId,
@@ -264,7 +295,13 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
     return
   }
   // Worker errors mutate nothing: the artifact stays iterating so the user
-  // can re-Iterate or the fallback agent can publish.
+  // can re-Iterate or the fallback agent can publish. The batch threads do
+  // hear about it, so no "working on it" note dangles.
+  const meta = await readArtifactMeta(store, artifactId).catch(() => undefined)
+  const pending = meta?.versions.find((row) => row.batch !== undefined && row.publishedAt === undefined)
+  if (pending !== undefined) {
+    await postThreadNotes(store, artifactId, pending.batch?.threadIds ?? [], "Worker failed: " + detail)
+  }
   await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
 }
 
@@ -334,6 +371,9 @@ const dispatchIteration = async (
     await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
     return false
   }
+  // Mark the batch as picked up: one agent message per open thread, so the
+  // review UI shows the worker claiming the batch while the duty runs.
+  await postThreadNotes(store, id, batchThreadIds, "Working on this for " + version.version + ".")
   return true
 }
 

@@ -910,6 +910,11 @@ describe("agent lane dispatch", () => {
 
     await iterate(created.id)
     const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane iterate")
+    // The worker claims the batch: an agent message lands on the thread.
+    const claimed = await laneView(created.id)
+    const claimMessages = claimed.threads.find((entry) => entry.id === thread.id)?.messages ?? []
+    expect(claimMessages[claimMessages.length - 1]?.author).toBe("agent")
+    expect(claimMessages[claimMessages.length - 1]?.body).toBe("Working on this for v2.")
     // While the work duty is parked mid-flight the feedback view reports the
     // running worker and the still-bound reviewer.
     const runningView = await laneView(created.id)
@@ -933,6 +938,10 @@ describe("agent lane dispatch", () => {
     const document = await laneApp.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
     expect(document.body).toContain("fake next")
     await waitFor(() => recorded.notes.some((note) => note.text === "published v2 of Lane iterate — redline-note"))
+    // The worker reports back on the batch thread once the version lands.
+    const doneView = await laneView(created.id)
+    const doneMessages = doneView.threads.find((entry) => entry.id === thread.id)?.messages ?? []
+    expect(doneMessages[doneMessages.length - 1]?.body).toBe("Addressed in v2. redline-note")
   })
 
   it("skips onDocument when the artifact is no longer iterating", async () => {
@@ -1032,6 +1041,25 @@ describe("agent lane dispatch", () => {
       return view.threads[0]?.messages[1]?.body === "reviewer unavailable: agent exploded"
     })
     expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
+  })
+
+  it("reports a worker failure back on the batch thread", async () => {
+    const created = await createLaneArtifact("Lane worker fail", "<p>lane-n v1</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "do the thing")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane worker fail")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane worker fail")
+    rejectDuty(workIndex, new Error("boom"))
+
+    await waitFor(async () => {
+      const view = await laneView(created.id)
+      const messages = view.threads[0]?.messages ?? []
+      return messages[messages.length - 1]?.body === "Worker failed: boom"
+    })
   })
 
   it("reports the worker debug view for configured lanes", async () => {

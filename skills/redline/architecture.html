@@ -69,7 +69,7 @@
     margin: 0 0 12px;
     letter-spacing: -0.02em;
   }
-  .lede { margin: 0; color: var(--mute); max-width: 62ch }
+  .lede { margin: 0; color: var(--mute); max-width: none }
   nav.toc {
     display: flex; flex-wrap: wrap; gap: 8px 14px;
     margin: 18px 0 0; padding: 0; list-style: none;
@@ -247,7 +247,7 @@
 <body>
 <div class="wrap">
 <header class="mast" id="header">
-  <p class="kicker">redline · architecture · v3</p>
+  <p class="kicker">redline · architecture · v4</p>
   <h1>The review turn belongs to redline</h1>
   <p class="lede" id="summary">
     Today the user's coding agent blocks on <code>wait_for_feedback</code>. Flip that.
@@ -360,8 +360,13 @@
   <p class="legend"><span><i class="sw" style="background:#d6453a"></i>blocked turn</span><span><i class="sw" style="background:#8a7d6e"></i>HTTP</span></p>
 
   <h3 id="flow-proposed">Proposed: two lanes, chat stays idle</h3>
-  <svg class="diagram" id="diag-proposed" viewBox="0 0 980 420" role="img" aria-labelledby="diag-proposed-title">
+  <svg class="diagram" id="diag-proposed" viewBox="0 0 980 430" role="img" aria-labelledby="diag-proposed-title">
     <title id="diag-proposed-title">Proposed loop: reviewer lane, worker lane, optional origin notify</title>
+    <defs>
+      <marker id="arrow-notify" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+        <path d="M0,0 L6,3 L0,6" fill="none" stroke="#3db8c5"/>
+      </marker>
+    </defs>
     <rect x="20" y="24" width="170" height="50" fill="#241f1b" stroke="#3db8c5"/>
     <text x="105" y="54" text-anchor="middle" fill="#3db8c5" font-size="13" font-family="system-ui">Origin chat</text>
     <rect x="240" y="24" width="170" height="50" fill="#241f1b" stroke="#3a322c"/>
@@ -396,8 +401,12 @@
     <text x="725" y="250" text-anchor="middle" fill="#b7aa98" font-size="12" font-family="system-ui">full document to POST /versions</text>
     <text x="725" y="290" text-anchor="middle" fill="#8a7d6e" font-size="11" font-family="system-ui">own adapter + model + template</text>
 
-    <path d="M105 74 V390 H255" stroke="#3db8c5" stroke-width="1.2" fill="none" stroke-dasharray="4 3"/>
-    <text x="112" y="382" fill="#3db8c5" font-size="12" font-family="system-ui">optional notify</text>
+    <path d="M255 320 V373 H340" stroke="#3db8c5" stroke-width="1.2" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-notify)"/>
+    <path d="M725 320 V373 H640" stroke="#3db8c5" stroke-width="1.2" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-notify)"/>
+    <rect x="340" y="348" width="300" height="50" fill="#241f1b" stroke="#3db8c5"/>
+    <text x="490" y="369" text-anchor="middle" fill="#3db8c5" font-size="13" font-family="system-ui">optional notify</text>
+    <text x="490" y="388" text-anchor="middle" fill="#8a7d6e" font-size="11" font-family="system-ui">one-line status after a duty</text>
+    <path d="M340 373 H16 V49 H20" stroke="#3db8c5" stroke-width="1.2" fill="none" stroke-dasharray="4 3" marker-end="url(#arrow-notify)"/>
   </svg>
   <p class="legend">
     <span><i class="sw" style="background:#3db8c5"></i>notify only</span>
