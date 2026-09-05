@@ -371,7 +371,7 @@ export const RedlinePlugin: Plugin = async () => {
 
       get_feedback: tool({
         description:
-          "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
+          "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, newest first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
         args: {
           artifactId: tool.schema.string().describe("Artifact id"),
           version: tool.schema

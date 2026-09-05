@@ -488,9 +488,9 @@ export const readFeedbackView = async (
   if (anchoredAt !== undefined) {
     threads = threads.filter((thread) => thread.anchorVersion === anchoredAt)
   }
-  const byCreatedAt = (a: Thread, b: Thread): number => a.createdAt.localeCompare(b.createdAt)
-  const open = threads.filter((thread) => thread.status === "open").sort(byCreatedAt)
-  const resolved = threads.filter((thread) => thread.status === "resolved").sort(byCreatedAt)
+  // Newest first, always: the review UI pins the freshest thread at the
+  // top, resolved or not.
+  const byCreatedAtDesc = (a: Thread, b: Thread): number => b.createdAt.localeCompare(a.createdAt)
   const updatedAt = docs.reduce(
     (latest, doc) => (doc.updatedAt > latest ? doc.updatedAt : latest),
     meta.updatedAt,
@@ -505,6 +505,6 @@ export const readFeedbackView = async (
     artifactUpdatedAt: meta.updatedAt,
     approvedAt: currentRow?.approvedAt,
     versions: meta.versions,
-    threads: [...open, ...resolved],
+    threads: [...threads].sort(byCreatedAtDesc),
   }
 }

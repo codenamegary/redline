@@ -834,6 +834,38 @@ describe("agent lane dispatch", () => {
     expect(recorded.notes[0]?.origin).toEqual({ host: "opencode", sessionId: "s-b" })
   })
 
+  it("places and answers a placeholder when the reviewer configures after create", async () => {
+    // Restart / late-config scenario: the artifact was created while the
+    // reviewer lane was "none", so nothing is bound and no waiter is parked.
+    // The first comment must still get a placeholder and a real reply.
+    writeFileSync(join(laneHome, "settings.json"), laneSettings({ reviewer: "none" }))
+    try {
+      const created = await createLaneArtifact("Lane late reviewer", "<p>lane-m</p>")
+      expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
+
+      // Flip the reviewer on after create (settings apply live), then comment.
+      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+      const thread = await createLaneThread(created.id, "answer me after reconfigure")
+      expect(thread.messages).toHaveLength(2)
+      expect(thread.messages[1]?.kind).toBe("thinking")
+
+      const dutyIndex = await waitForDuty(
+        (duty) => duty.lane === "reviewer" && duty.title === "Lane late reviewer",
+      )
+      resolveDuty(dutyIndex)
+      await waitFor(async () => {
+        const view = await laneView(created.id)
+        const messages = view.threads[0]?.messages ?? []
+        return (
+          messages[1]?.kind === "text" &&
+          messages[1]?.body === "reply:" + (thread.messages[1]?.id ?? "")
+        )
+      })
+    } finally {
+      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+    }
+  })
+
   it("dispatches again with a fresh target on a follow-up comment", async () => {
     const created = await createLaneArtifact("Lane followup", "<p>lane-c</p>")
     await waitForBound(created.id)

@@ -53,6 +53,12 @@ const isAgentAttached = (id: string): boolean =>
   (workerRuntime.current?.presence(id).reviewerBound ?? false) ||
   (workerRuntime.current?.presence(id).workerRunning ?? false)
 
+// A configured reviewer answers comments even before its bind lands (fresh
+// daemon, settings flipped after create), so placeholder placement must not
+// depend on live presence alone.
+const reviewerConfigured = async (store: Store): Promise<boolean> =>
+  (await readEffectiveSettings(store.home)).reviewer.adapter !== "none"
+
 // Per-lane presence for the feedback view, so the shell can say which lane
 // is actually live instead of collapsing everything into agentAttached.
 const lanePresence = (id: string): { reviewerAttached: boolean; workerRunning: boolean } => {
@@ -185,7 +191,23 @@ const dispatchReplies = async (store: Store, artifactId: string): Promise<void> 
   const meta = await readArtifactMeta(store, artifactId)
   const view = await readFeedbackView(store, artifactId)
   const openThreads = view.threads.filter((thread) => thread.status === "open")
-  const targets = thinkingTargets(openThreads)
+  // Self-heal: a comment can land while the reviewer looks unattached (bind
+  // race, settings flip mid-request) and skip the route's placeholder gate.
+  // Every open review-status thread that still ends in a user message gets
+  // its placeholder here, then joins the duty.
+  if (meta.status === "review") {
+    for (const thread of openThreads) {
+      const last = thread.messages[thread.messages.length - 1]
+      if (last !== undefined && last.author === "user" && last.kind === "text") {
+        await appendThreadMessage(store, artifactId, thread.id, {
+          body: "…",
+          author: "agent",
+          kind: "thinking",
+        })
+      }
+    }
+  }
+  const targets = await collectTargets(store, artifactId)
   if (targets.length === 0) return
   dispatcher.enqueueReply(artifactId, {
     lane: "reviewer",
@@ -442,7 +464,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
     waitingAgents.set(id, (waitingAgents.get(id) ?? 0) + 1)
     try {
       for (;;) {
-        // Artifact-scoped view: every thread, open first. With ?version=vN,
+        // Artifact-scoped view: every thread, newest first. With ?version=vN,
         // only threads pinned on vN. The poll wakes when updatedAt (thread
         // activity, replies, approve) or iteratedAt (Iterate) moves past
         // `after` — no matter which version a thread lives in.
@@ -471,7 +493,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
       author: body.author,
     })
     const withPlaceholder =
-      body.author === "user" && isAgentAttached(id)
+      body.author === "user" && (isAgentAttached(id) || (await reviewerConfigured(store)))
         ? await appendThreadMessage(store, id, thread.id, {
             body: "…",
             author: "agent",
@@ -497,7 +519,7 @@ export const registerApiRoutes = (app: FastifyInstance, store: Store, options?: 
       body.author === "user" &&
       previous?.kind !== "thinking" &&
       (await readArtifactMeta(store, id)).status === "review" &&
-      isAgentAttached(id)
+      (isAgentAttached(id) || (await reviewerConfigured(store)))
     ) {
       thread = await appendThreadMessage(store, id, threadId, {
         body: "…",

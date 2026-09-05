@@ -278,7 +278,7 @@ describe("artifact store", () => {
     expect(missing).rejects.toMatchObject({ kind: "not-found" })
   })
 
-  it("sorts the view open-first and derives anchor versions for unpinned threads", async () => {
+  it("sorts the view newest-first and derives anchor versions for unpinned threads", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
     const first = await appendThread(store, meta.id, {
@@ -293,7 +293,9 @@ describe("artifact store", () => {
       body: "open one",
       author: "user",
     })
-    await setThreadStatus(store, meta.id, first.id, "resolved")
+    // Resolve the NEWER thread: newest-first means it still leads, even
+    // though the older open thread would have won under open-first grouping.
+    await setThreadStatus(store, meta.id, second.id, "resolved")
 
     // Rewrite the first thread without anchorVersion; the view derives it
     // from the feedback file name.
@@ -307,7 +309,6 @@ describe("artifact store", () => {
     expect(view.threads[1]?.id).toBe(first.id)
     expect(view.threads[1]?.anchorVersion).toBe("v1")
   })
-
   it("rejects threads pinned on unknown versions", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })

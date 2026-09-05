@@ -379,7 +379,7 @@ export default function (pi: ExtensionAPI): void {
     name: "get_feedback",
     label: "Get feedback",
     description:
-      "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, open ones first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
+      "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, newest first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
     promptSnippet: "Read current redline feedback for an artifact",
     parameters: Type.Object({
       artifactId: Type.String({ description: "Artifact id" }),
