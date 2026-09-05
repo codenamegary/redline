@@ -24,6 +24,11 @@ describe("ui routes", () => {
     for (const marker of ["Settings", "Reviewer", "Worker", "Notify"]) {
       expect(response.body).toContain(marker)
     }
+    // First paint shows only the active pane: inactive panes must carry the
+    // hidden attribute before any tab click.
+    expect(response.body).toContain('<section id="pane-reviewer" role="tabpanel" aria-labelledby="tab-reviewer">')
+    expect(response.body).toContain('<section id="pane-worker" role="tabpanel" aria-labelledby="tab-worker" hidden>')
+    expect(response.body).toContain('<section id="pane-notify" role="tabpanel" aria-labelledby="tab-notify" hidden>')
   })
 
   it("links Settings from the gallery header", async () => {

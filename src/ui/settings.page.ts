@@ -63,11 +63,11 @@ const presetOptions = (): string =>
     })
     .join("") + '<option value="custom">Custom</option>'
 
-const lanePane = (lane: LaneId): string => {
+const lanePane = (lane: LaneId, active: boolean): string => {
   const id = escapeHtml(lane)
   const label = escapeHtml(lane === "reviewer" ? "Reviewer" : "Worker")
   return (
-    '<section id="pane-' + id + '" role="tabpanel" aria-labelledby="tab-' + id + '">' +
+    '<section id="pane-' + id + '" role="tabpanel" aria-labelledby="tab-' + id + '"' + (active ? "" : " hidden") + ">" +
     '<h2>' + label + " lane</h2>" +
     '<div class="field">' +
     '<label for="' + id + '-adapter">Adapter</label>' +
@@ -300,8 +300,8 @@ export const renderSettingsPage = (): string =>
     <button type="button" role="tab" id="tab-worker" aria-controls="pane-worker" aria-selected="false" tabindex="-1">Worker</button>
     <button type="button" role="tab" id="tab-notify" aria-controls="pane-notify" aria-selected="false" tabindex="-1">Notify</button>
   </nav>
-  ${lanePane("reviewer")}
-  ${lanePane("worker")}
+  ${lanePane("reviewer", true)}
+  ${lanePane("worker", false)}
   <section id="pane-notify" role="tabpanel" aria-labelledby="tab-notify" hidden>
     <h2>Notify</h2>
     <div class="field">
