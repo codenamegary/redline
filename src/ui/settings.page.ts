@@ -1,14 +1,27 @@
+import { homedir } from "node:os"
+
+import { ACP_PRESETS } from "../worker/presets"
 import { escapeHtml } from "./markup"
 
-// Preset → argv table for the client. Mirrors ACP_PRESETS in
-// src/worker/presets.ts; kept literal so the page ships without a build
-// step. Custom has no entry, which leaves the command input editable.
-const presetArgvSource = `var PRESET_ARGV = {
-  "opencode": ["opencode", "acp"],
-  "claude-code": ["claude-code-acp"],
-  "gemini": ["gemini", "--experimental-acp"],
-  "codex": ["codex", "acp"]
-}`
+// Preset → argv table for the client, rendered from ACP_PRESETS so the
+// page can never drift from the server-side table. Custom has no entry,
+// which leaves the command input editable.
+const presetArgvSource = (): string => {
+  const table: Record<string, string[]> = {}
+  Object.entries(ACP_PRESETS).forEach(([id, preset]) => {
+    table[id] = preset.argv
+  })
+  return "var PRESET_ARGV = " + JSON.stringify(table)
+}
+
+// Display form of an argv: shorten the user-local home prefix to ~ so
+// option labels and command boxes stay readable.
+const displayArgv = (argv: string[]): string =>
+  argv
+    .map((part) => part.replace(new RegExp("^" + escapeRegExp(homedir()), ""), "~"))
+    .join(" ")
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
 // Command string → argv splitter honoring double quotes, e.g.
 // "opencode acp" → ["opencode", "acp"]. Exported as source so the page
@@ -43,11 +56,12 @@ const adapterOptions = (): string =>
 
 // Option labels carry the argv so the mapping is visible before saving.
 const presetOptions = (): string =>
-  '<option value="opencode">OpenCode &middot; opencode acp</option>' +
-  '<option value="claude-code">Claude Code &middot; claude-code-acp</option>' +
-  '<option value="gemini">Gemini CLI &middot; gemini --experimental-acp</option>' +
-  '<option value="codex">Codex &middot; codex acp</option>' +
-  '<option value="custom">Custom</option>'
+  Object.entries(ACP_PRESETS)
+    .map(([id, preset]) => {
+      const label = preset.label.replace(/ ACP$/, "")
+      return '<option value="' + escapeHtml(id) + '">' + escapeHtml(label) + " &middot; " + escapeHtml(displayArgv(preset.argv)) + "</option>"
+    })
+    .join("") + '<option value="custom">Custom</option>'
 
 const lanePane = (lane: LaneId): string => {
   const id = escapeHtml(lane)
@@ -90,7 +104,7 @@ const clientScript = `(function () {
   var toastEl = document.getElementById("toast")
   var LANES = ["reviewer", "worker"]
 
-  ${presetArgvSource}
+  ${presetArgvSource()}
 
   ${splitCommandSource}
 

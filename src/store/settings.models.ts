@@ -6,7 +6,7 @@ export const LaneAdapterSchema = z.enum(laneAdapters)
 
 export type LaneAdapter = (typeof laneAdapters)[number]
 
-export const lanePresets = ["opencode", "claude-code", "gemini", "codex", "custom"] as const
+export const lanePresets = ["opencode", "cursor", "claude-code", "gemini", "codex", "custom"] as const
 
 export const LanePresetSchema = z.enum(lanePresets)
 
