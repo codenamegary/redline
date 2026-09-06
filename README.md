@@ -1,6 +1,4 @@
-# 📌 redline
-
-**The agent renders. The human redlines.** 🔴
+# 📌 redline - ~~Because sometimes~~ markdown ~~just ain't~~ is not enough
 
 ![license](https://img.shields.io/badge/license-MIT-blue) ![cloud](https://img.shields.io/badge/cloud-never-black) ![accounts](https://img.shields.io/badge/accounts-none-orange) ![vibes](https://img.shields.io/badge/vibes-immaculate-purple)
 
