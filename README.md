@@ -122,11 +122,10 @@ curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.s
 └── artifacts/
     └── 2026-01-15-143205-dashboard/
         ├── meta.json               # title, prompt, status, version ledger
-        ├── v1/index.html           # self-contained artifact versions
-        ├── v2/index.html
-        └── feedback/
-            ├── v1.json             # comment threads, stored per version
-            └── v2.json
+        ├── v1-index.html           # self-contained artifact versions
+        ├── v1-feedback.json        # comment threads, stored per version
+        ├── v2-index.html
+        └── v2-feedback.json
 ```
 
 That's the whole kingdom. 👑

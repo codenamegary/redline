@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises"
-import { join } from "node:path"
 
 import { FastifyInstance } from "fastify"
 
@@ -8,7 +7,7 @@ import {
   approveVersion,
   appendThread,
   appendThreadMessage,
-  artifactVersionDir,
+  artifactVersionFile,
   countOpenThreads,
   createArtifact,
   listArtifacts,
@@ -343,8 +342,8 @@ const dispatchIteration = async (
   const batchThreadIds = version.batch?.threadIds ?? []
   const view = await readFeedbackView(store, id)
   const batchThreads = view.threads.filter((thread) => batchThreadIds.includes(thread.id))
-  // Current version's document on disk: <home>/artifacts/<id>/<version>/index.html.
-  const htmlPath = join(artifactVersionDir(store, id, meta.current), "index.html")
+  // Current version's document on disk: <home>/artifacts/<id>/vN-index.html.
+  const htmlPath = artifactVersionFile(store, id, meta.current)
   const seed: SeedSpec = {
     html: await readFile(htmlPath, "utf8").catch(() => ""),
     version: meta.current,

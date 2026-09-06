@@ -926,7 +926,7 @@ describe("agent lane dispatch", () => {
     expect(duty.threads.map((entry) => entry.id)).toEqual([thread.id])
     expect(duty.targets).toEqual([])
     expect(duty.promptTemplate).toBe(DEFAULT_WORKER_PROMPT)
-    expect(duty.htmlPath).toBe(join(laneHome, "artifacts", created.id, "v1", "index.html"))
+    expect(duty.htmlPath).toBe(join(laneHome, "artifacts", created.id, "v1-index.html"))
     const workerSeed = recorded.seeds.find((seed) => seed !== undefined)
     expect(workerSeed).toEqual({ html: "<p>lane-d v1</p>", version: "v1" })
 

@@ -56,14 +56,11 @@ export const artifactDir = (store: Store, id: string): string => join(store.arti
 export const artifactMetaPath = (store: Store, id: string): string =>
   join(artifactDir(store, id), "meta.json")
 
-export const artifactVersionDir = (store: Store, id: string, version: string): string =>
-  join(artifactDir(store, id), version)
-
-export const artifactFeedbackDir = (store: Store, id: string): string =>
-  join(artifactDir(store, id), "feedback")
+export const artifactVersionFile = (store: Store, id: string, version: string): string =>
+  join(artifactDir(store, id), version + "-index.html")
 
 const feedbackDocPath = (store: Store, id: string, version: string): string =>
-  join(artifactFeedbackDir(store, id), version + ".json")
+  join(artifactDir(store, id), version + "-feedback.json")
 
 const pad2 = (value: number): string => String(value).padStart(2, "0")
 
@@ -135,9 +132,8 @@ export const createArtifact = async (store: Store, input: CreateArtifactInput): 
     versions: [{ version: VersionSchema.parse("v1"), createdAt: now, publishedAt: now, note: input.note }],
     origin: input.origin,
   }
-  const firstVersionDir = artifactVersionDir(store, id, "v1")
-  await mkdir(firstVersionDir, { recursive: true })
-  await writeFile(join(firstVersionDir, "index.html"), input.html, "utf8")
+  await mkdir(artifactDir(store, id), { recursive: true })
+  await writeFile(artifactVersionFile(store, id, "v1"), input.html, "utf8")
   await writeArtifactMeta(store, id, meta)
   return meta
 }
@@ -162,9 +158,9 @@ export const publishIteration = async (store: Store, id: string, input: PublishI
     const pending = pendingVersion(meta)
     if (pending === undefined) throw storeError("conflict", "no pending iteration to publish")
     const now = new Date().toISOString()
-    const dir = artifactVersionDir(store, id, pending.version)
-    await mkdir(dir, { recursive: true })
-    await writeFile(join(dir, "index.html"), input.html, "utf8")
+    const file = artifactVersionFile(store, id, pending.version)
+    await mkdir(artifactDir(store, id), { recursive: true })
+    await writeFile(file, input.html, "utf8")
     const updated: ArtifactMeta = {
       ...meta,
       status: "review",
@@ -250,7 +246,7 @@ export const readFeedbackDoc = async (store: Store, id: string, version: string)
 }
 
 const writeFeedbackDoc = async (store: Store, id: string, version: string, doc: FeedbackDoc): Promise<void> => {
-  await mkdir(artifactFeedbackDir(store, id), { recursive: true })
+  await mkdir(artifactDir(store, id), { recursive: true })
   await writeFile(feedbackDocPath(store, id, version), JSON.stringify(doc, null, 2) + "\n", "utf8")
 }
 
@@ -420,16 +416,16 @@ export const listArtifacts = async (store: Store): Promise<ArtifactMeta[]> => {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 }
 
-const feedbackFilePattern = /^v\d+\.json$/
+const feedbackFilePattern = /^v\d+-feedback\.json$/
 
 const readAllFeedbackDocs = async (store: Store, id: string): Promise<FeedbackDoc[]> => {
-  const files = await readdir(artifactFeedbackDir(store, id)).catch(() => [])
+  const files = await readdir(artifactDir(store, id)).catch(() => [])
   const docs = await Promise.all(
     files
       .filter((file) => feedbackFilePattern.test(file))
       .map(async (file) => {
         try {
-          const raw = await readFile(join(artifactFeedbackDir(store, id), file), "utf8")
+          const raw = await readFile(join(artifactDir(store, id), file), "utf8")
           return FeedbackDocSchema.parse(JSON.parse(raw))
         } catch (error) {
           console.error("redline: skipping unreadable feedback file " + file, error)

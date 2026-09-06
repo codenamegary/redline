@@ -45,7 +45,7 @@ describe("artifact store", () => {
     expect(meta.versions[0]?.batch).toBeUndefined()
     expect(meta.title).toBe("Dashboard redesign")
     expect(meta.prompt).toBe("a metrics dashboard")
-    const html = readFileSync(join(store.artifactsDir, meta.id, "v1", "index.html"), "utf8")
+    const html = readFileSync(join(store.artifactsDir, meta.id, "v1-index.html"), "utf8")
     expect(html).toBe("<h1 id=\"hero\">Hello</h1>")
     const stored = JSON.parse(readFileSync(join(store.artifactsDir, meta.id, "meta.json"), "utf8")) as {
       id: string
@@ -90,8 +90,8 @@ describe("artifact store", () => {
     expect(published.versions[1]?.note).toBe("second pass")
     expect(published.versions[1]?.publishedAt).toBeDefined()
     expect(published.versions[1]?.batch?.threadIds).toEqual([thread.id])
-    expect(readFileSync(join(store.artifactsDir, meta.id, "v1", "index.html"), "utf8")).toBe("<p>v1</p>")
-    expect(readFileSync(join(store.artifactsDir, meta.id, "v2", "index.html"), "utf8")).toBe("<p>v2</p>")
+    expect(readFileSync(join(store.artifactsDir, meta.id, "v1-index.html"), "utf8")).toBe("<p>v1</p>")
+    expect(readFileSync(join(store.artifactsDir, meta.id, "v2-index.html"), "utf8")).toBe("<p>v2</p>")
   })
 
   it("rejects publishing outside iterating", async () => {
@@ -303,7 +303,7 @@ describe("artifact store", () => {
 
     // Rewrite the first thread without anchorVersion; the view derives it
     // from the feedback file name.
-    const path = join(store.artifactsDir, meta.id, "feedback", "v1.json")
+    const path = join(store.artifactsDir, meta.id, "v1-feedback.json")
     const raw = JSON.parse(readFileSync(path, "utf8")) as { threads: Array<{ anchorVersion?: string }> }
     delete raw.threads[0]?.anchorVersion
     writeFileSync(path, JSON.stringify(raw), "utf8")

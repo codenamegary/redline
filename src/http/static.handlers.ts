@@ -1,12 +1,11 @@
 import { createReadStream } from "node:fs"
 import { stat } from "node:fs/promises"
-import { join, resolve, sep } from "node:path"
 
 import { FastifyInstance } from "fastify"
 import { z } from "zod"
 
 import { ArtifactIdSchema, VersionSchema } from "../store/artifact.models"
-import { artifactVersionDir, readArtifactMeta, Store } from "../store/artifact.store"
+import { artifactVersionFile, readArtifactMeta, Store } from "../store/artifact.store"
 import { storeError } from "../store/errors"
 
 const contentTypes: Record<string, string> = {
@@ -46,36 +45,17 @@ const StaticParamsSchema = z.object({
   "*": z.string(),
 })
 
-const resolveFileTarget = async (baseDir: string, relativePath: string): Promise<string | null> => {
-  const filePath = resolve(baseDir, relativePath)
-  if (!filePath.startsWith(baseDir + sep)) return null
-  const direct = await stat(filePath).catch(() => undefined)
-  if (direct?.isFile()) return filePath
-  if (direct?.isDirectory()) {
-    const indexPath = join(filePath, "index.html")
-    const index = await stat(indexPath).catch(() => undefined)
-    if (index?.isFile()) return indexPath
-  }
-  return null
-}
-
 export const registerArtifactFiles = (app: FastifyInstance, store: Store): void => {
   app.get("/a/:id/:version/*", async (request, reply) => {
     const params = StaticParamsSchema.parse(request.params)
     const meta = await readArtifactMeta(store, params.id)
     const version = params.version === "current" ? meta.current : params.version
-    const baseDir = artifactVersionDir(store, params.id, version)
-    const rawSegments = params["*"].split("/")
-    if (rawSegments.some((segment) => segment.includes("\0"))) {
-      throw storeError("not-found", "file not found: " + params["*"])
+    const target = artifactVersionFile(store, params.id, version)
+    const statResult = await stat(target).catch(() => undefined)
+    if (statResult?.isFile()) {
+      reply.header("cache-control", "no-store").type(contentTypeForPath(target))
+      return reply.send(createReadStream(target))
     }
-    const segments = rawSegments.filter(
-      (segment) => segment.length > 0 && segment !== "." && segment !== "..",
-    )
-    const relativePath = segments.length === 0 ? "index.html" : segments.join("/")
-    const target = await resolveFileTarget(baseDir, relativePath)
-    if (target === null) throw storeError("not-found", "file not found: " + params["*"])
-    reply.header("cache-control", "no-store").type(contentTypeForPath(target))
-    return reply.send(createReadStream(target))
+    throw storeError("not-found", "file not found: " + params["*"])
   })
 }

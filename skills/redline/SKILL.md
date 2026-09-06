@@ -89,7 +89,7 @@ curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/versions -H 'content
 curl -s http://127.0.0.1:4739/api/v1/settings
 ```
 
-Feedback is also plain JSON on disk at `~/.redline/artifacts/<id>/feedback/v<N>.json`, readable with the `read` tool. Per-version files are the storage of record; the HTTP view merges them.
+Feedback is also plain JSON on disk at `~/.redline/artifacts/<id>/v<N>-feedback.json`, readable with the `read` tool. Per-version files are the storage of record; the HTTP view merges them.
 
 ## Feedback shape
 
