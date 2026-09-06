@@ -24,7 +24,7 @@ export type DispatcherOptions = {
   // Settings are read through this home at call time, so config flips land
   // without a restart.
   home: string
-  // Adapter registry. artifact.routes registers the real ACP adapter;
+  // Adapter registry. routes.context.ts registers the real ACP adapter;
   // tests register fakes. Lanes resolve the adapter again at duty time.
   adapters: DispatcherAdapters
   handlers: DispatcherHandlers
@@ -56,7 +56,7 @@ export type Dispatcher = {
 }
 
 // Module-level default the routes module initializes at server build time,
-// mirroring the in-memory waitingAgents map in artifact.routes.ts.
+// mirroring the in-memory waitingAgents map in api/routes.context.ts.
 export const workerRuntime: { current: Dispatcher | undefined } = { current: undefined }
 
 type ArtifactRuntime = {
