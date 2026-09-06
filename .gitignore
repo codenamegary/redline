@@ -4,3 +4,5 @@ dist/
 .DS_Store
 *.tsbuildinfo
 .worktrees/
+.redline-drafts/
+demo/.agents

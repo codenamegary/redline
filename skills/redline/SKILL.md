@@ -17,6 +17,8 @@ If the user explicitly asks you to read feedback or publish a new version, `get_
 
 ## Workflow
 
+Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPDIR`, `~/.redline`, or any path outside the workspace. Those writes prompt for permission.
+
 1. Decide the artifact's shape: architecture doc, decision record, API contract, data flow, comparison, UI mockup, explainer. One artifact = one idea. Split unrelated topics into separate artifacts.
 2. Author a complete single-file HTML document:
    - All CSS and JS inline. No external requests: no CDNs, web fonts, or remote images. Use inline SVG for diagrams.
@@ -26,8 +28,10 @@ If the user explicitly asks you to read feedback or publish a new version, `get_
    - For API contracts: one block per endpoint with a stable id (for example `id="post-orders"`), showing method, path, request and response examples.
    - For architecture: label every box and edge, add a legend, and put trade-off prose next to the diagram.
    - Start with a header: title plus a one-paragraph summary of the decision or idea.
-3. Call `create_artifact` with the full HTML. It returns the review URL.
-4. Share the URL, say what to look at, and stop. The response text confirms this whether or not a reviewer lane is configured.
+3. Write the document to `.redline-drafts/<short-slug>.html` in the current workspace. Use the Write tool. Do not use `mktemp`, `/tmp`, or a path outside the workspace.
+4. Read the draft. Call `create_artifact` with the file contents as `html`. Pass the string, not a path. The tool returns the review URL. Same rule for `update_artifact` when the user asked you to publish.
+5. Delete the draft file. Remove `.redline-drafts/` if it is empty. Do not commit the draft.
+6. Share the URL, say what to look at, and stop. The response text confirms this whether or not a reviewer lane is configured.
 
 ## Tools
 
@@ -69,6 +73,8 @@ Skill text updates come from the skills CLI (`npx skills update`). Do not ask th
 ## Without native tools
 
 The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLINE_PORT`). To check it, probe `/api/v1/health`. If nothing answers, bootstrap it (above).
+
+Stage HTML the same way as the workflow: write `.redline-drafts/<short-slug>.html` in the current workspace, then POST the file contents as `html`. Never write the draft to `/tmp`. Delete the draft after the request succeeds.
 
 ```bash
 # create

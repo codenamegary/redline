@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "redline": {
+      "source": "codenamegary/redline",
+      "sourceType": "github",
+      "skillPath": "skills/redline/SKILL.md",
+      "computedHash": "c206d9c892c79a046f28b64eea3be0e7df1bfb8a5e00db1674d68a5c2bbc748e"
+    }
+  }
+}
