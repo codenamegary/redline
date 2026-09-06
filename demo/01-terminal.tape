@@ -31,6 +31,6 @@ Sleep 6s
 Type@20ms "Redline an interactive mobile app UI mockup and corresponding API contracts for a seating selector for a concert venue with 100 GA floor seats, 200 mezzanine seats and 300 balcony seats."
 Sleep 1s
 Enter
-Sleep 5m
+Sleep 10m
 
 
