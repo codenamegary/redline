@@ -15,13 +15,14 @@ import {
 } from "../agent.response"
 
 // opencode plugin for the redline review server. Mirrors src/pi/redline.extension.ts:
-// same five tool names, same HTTP API (see skills/redline/SKILL.md). The review loop is
-// turn-based: comments wake the agent for replies only; the user's Iterate action
-// freezes open threads into a batch and wakes the agent for work (publishing is
-// 409-gated server-side); approval is a version stamp meaning "done for now". The
-// server daemon is lazily bootstrapped on first use: the app is found or cloned into
-// ~/.redline/app, dependencies are installed via install.sh, and the daemon is
-// started and rediscovered via ~/.redline/server.json.
+// same four tool names, same HTTP API (see skills/redline/SKILL.md). After create,
+// share the URL and stop: redline's reviewer and worker lanes run the review loop,
+// and notify (when on) posts a one-line status ping into this session via the
+// OpenCode HTTP server. The host never waits, replies, or publishes unless the
+// user asks it to create or publish an artifact. Origin is stored as
+// { host: "opencode", sessionId } for those pings. The daemon is lazily
+// bootstrapped on first use: app found or cloned into ~/.redline/app,
+// install.sh, rediscovered via ~/.redline/server.json.
 
 const repoUrl = process.env.REDLINE_REPO ?? "https://github.com/codenamegary/redline.git"
 
@@ -83,10 +84,6 @@ const VersionRowSchema = z.object({
 })
 
 type VersionRow = z.infer<typeof VersionRowSchema>
-
-const epoch = "1970-01-01T00:00:00.000Z"
-
-const maxIso = (values: string[]): string => values.reduce((latest, value) => (value > latest ? value : latest))
 
 const pendingRow = (view: FeedbackView): VersionRow | undefined =>
   view.versions.find((row) => row.batch !== undefined && row.publishedAt === undefined)
@@ -272,39 +269,6 @@ const renderThreads = (view: FeedbackView): string => {
     .join("\n")
 }
 
-const workDutyText = (view: FeedbackView, artifactId: string): string => {
-  const pending = pendingRow(view)
-  const count = pending?.batch?.threadIds.length ?? 0
-  return (
-    "WORK DUTY on " +
-    artifactId +
-    ": iteration " +
-    (pending?.version ?? view.current) +
-    " was submitted with " +
-    String(count) +
-    " thread(s) in the frozen batch:\n" +
-    renderThreads(view) +
-    "\nAddress the batch, then publish with update_artifact (note = what changed). Publishing returns the artifact to review. Meanwhile you may reply in threads."
-  )
-}
-
-const replyDutyText = (view: FeedbackView, artifactId: string): string => {
-  const open = view.threads.filter((thread: Thread) => thread.status === "open").length
-  return (
-    "REPLY DUTY on " +
-    artifactId +
-    " (" +
-    view.current +
-    ", status " +
-    view.artifactStatus +
-    ", " +
-    String(open) +
-    " open):\n" +
-    renderThreads(view) +
-    "\nConversation only: replace thinking placeholders via PATCH or post replies. update_artifact is rejected (409) until the user hits Iterate."
-  )
-}
-
 const jsonInit = (method: string, body: unknown, signal?: AbortSignal): RequestInit => ({
   method: method,
   headers: { "content-type": "application/json" },
@@ -371,7 +335,7 @@ export const RedlinePlugin: Plugin = async () => {
 
       get_feedback: tool({
         description:
-          "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, newest first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations.",
+          "Read the comment threads and loop status of a redline artifact right now. Returns every thread on the artifact, newest first: pinned-on/resolved-in versions, element selectors, quoted text, pending thinking placeholders, presence, and pending iterations. The last agent line on a thread may be a worker-lane note (working / addressed / failed), not a new user pin.",
         args: {
           artifactId: tool.schema.string().describe("Artifact id"),
           version: tool.schema
@@ -408,93 +372,6 @@ export const RedlinePlugin: Plugin = async () => {
                 ? "\n" + view.current + " approved \u2014 done for now."
                 : ""
           return header + pendingLine + "\n" + renderThreads(view)
-        },
-      }),
-
-      wait_for_feedback: tool({
-        description:
-          "Block until the user comments (reply duty: answer in threads, never publish), hits Iterate (work duty: address the frozen batch and publish), or approves the current version (exit: done for now, hand control back). Esc cancels the wait.",
-        args: {
-          artifactId: tool.schema.string().describe("Artifact id"),
-          timeoutSeconds: tool.schema
-            .number()
-            .optional()
-            .describe("Max seconds to block, default 120, max 300"),
-          after: tool.schema
-            .string()
-            .optional()
-            .describe(
-              "ISO timestamp; wake only for changes after it. By default open threads or a pending iteration return immediately, otherwise the call blocks from now.",
-            ),
-        },
-        async execute(params, ctx) {
-          const base = await ensureDaemon()
-          const timeoutSeconds = Math.min(Math.max(Math.trunc(params.timeoutSeconds ?? 120), 1), 300)
-          const artifactPath = "/api/v1/artifacts/" + encodeURIComponent(params.artifactId) + "/feedback"
-          ctx.metadata({
-            title: "Waiting up to " + String(timeoutSeconds) + "s for feedback on " + params.artifactId,
-          })
-          try {
-            const initial = FeedbackViewSchema.parse(
-              await requestJson(base, artifactPath, { signal: ctx.abort }),
-            )
-            // An iteration in flight is always work, whatever else happened.
-            if (initial.artifactStatus === "iterating" || pendingRow(initial) !== undefined) {
-              return workDutyText(initial, params.artifactId)
-            }
-            if (params.after === undefined) {
-              const openCount = initial.threads.filter((thread: Thread) => thread.status === "open").length
-              if (openCount > 0) {
-                return (
-                  "Feedback already waiting on " +
-                  params.artifactId +
-                  " (" +
-                  initial.current +
-                  ", status: " +
-                  initial.artifactStatus +
-                  "):\n" +
-                  renderThreads(initial)
-                )
-              }
-            }
-            const after =
-              params.after ??
-              maxIso([
-                initial.updatedAt,
-                initial.artifactUpdatedAt,
-                initial.iteratedAt,
-                initial.approvedAt ?? epoch,
-              ])
-            const body = await requestJson(
-              base,
-              artifactPath + "?wait=" + String(timeoutSeconds) + "&after=" + encodeURIComponent(after),
-              { signal: ctx.abort },
-            )
-            const view = FeedbackViewSchema.parse(body)
-            if (view.artifactStatus === "iterating" || pendingRow(view) !== undefined) {
-              return workDutyText(view, params.artifactId)
-            }
-            if (view.approvedAt !== undefined && view.approvedAt > after) {
-              return (
-                "EXIT on " +
-                params.artifactId +
-                ": " +
-                view.current +
-                " approved \u2014 done for now. Report the sign-off and hand control back to the user. The artifact stays open: a later Iterate re-attaches you."
-              )
-            }
-            const changed = view.updatedAt > after || view.artifactUpdatedAt > after
-            return changed
-              ? replyDutyText(view, params.artifactId)
-              : "No new feedback within " +
-                  String(timeoutSeconds) +
-                  "s. Status is still " +
-                  view.artifactStatus +
-                  "."
-          } catch (error) {
-            if (ctx.abort.aborted) return "wait_for_feedback cancelled"
-            throw error
-          }
         },
       }),
 

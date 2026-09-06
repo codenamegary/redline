@@ -250,7 +250,8 @@
   <p class="kicker">redline · architecture · v4</p>
   <h1>The review turn belongs to redline</h1>
   <p class="lede" id="summary">
-    Today the user's coding agent blocks on <code>wait_for_feedback</code>. Flip that.
+    This is now shipped. The user's coding agent no longer blocks on a wait loop:
+    it creates the artifact, shares the URL, and stops.
     redline owns two lanes: a <strong>reviewer</strong> for thread replies, and a
     <strong>worker</strong> for HTML on Iterate. Each lane has its own adapter, model,
     and prompt template. The origin chat is optional <strong>notify</strong> only.
@@ -334,13 +335,13 @@
 
 <section id="flows">
   <h2>Flows</h2>
-  <h3 id="flow-today">Today: the coding turn waits</h3>
+  <h3 id="flow-today">Shipped: the coding turn does not wait</h3>
   <svg class="diagram" id="diag-today" viewBox="0 0 980 280" role="img" aria-labelledby="diag-today-title">
-    <title id="diag-today-title">Current loop: user chat blocked on wait_for_feedback</title>
+    <title id="diag-today-title">Host turn ends after create; redline lanes run the loop</title>
     <rect x="20" y="40" width="180" height="56" fill="#241f1b" stroke="#3a322c"/>
     <text x="110" y="74" text-anchor="middle" fill="#f3eadc" font-size="14" font-family="system-ui">User chat</text>
     <rect x="260" y="40" width="200" height="56" fill="#241f1b" stroke="#d6453a"/>
-    <text x="360" y="74" text-anchor="middle" fill="#d6453a" font-size="14" font-family="system-ui">wait_for_feedback</text>
+    <text x="360" y="74" text-anchor="middle" fill="#d6453a" font-size="14" font-family="system-ui">create, share, stop</text>
     <rect x="520" y="40" width="180" height="56" fill="#241f1b" stroke="#3a322c"/>
     <text x="610" y="74" text-anchor="middle" fill="#f3eadc" font-size="14" font-family="system-ui">redline HTTP</text>
     <rect x="760" y="40" width="180" height="56" fill="#241f1b" stroke="#3a322c"/>
@@ -491,7 +492,7 @@ type ProbeResult = { ok: true } | { ok: false; detail: string }</pre>
       <tr><td><code>AcpAdapter</code></td><td>Spawn a preset ACP command (see presets). New session per lane run. Worker session gets HTML as the first resource or user message.</td><td>No. ACP is editor and agent, not post into existing TUI.</td><td>Default for both lanes.</td></tr>
       <tr><td><code>OpenCodeSdkAdapter</code></td><td><code>POST /session</code> then prompt. Same seed rule for worker.</td><td>Yes. <code>POST /session/:id/prompt_async</code> on the captured origin.</td><td>When the user wants OpenCode HTTP instead of ACP, or for notify.</td></tr>
       <tr><td><code>ClaudeCliAdapter</code></td><td>Host-specific spawn if we later want Claude Code without ACP.</td><td>Only if that host can inject a session.</td><td>Custom adapter. Dispatcher stays the same.</td></tr>
-      <tr><td><code>NullAdapter</code></td><td>None.</td><td>None.</td><td>That lane falls back to <code>wait_for_feedback</code> in the origin agent.</td></tr>
+      <tr><td><code>NullAdapter</code></td><td>None.</td><td>None.</td><td>That lane is off. The loop pauses until it is configured; the origin agent never waits in its place.</td></tr>
     </tbody>
   </table>
   <h3 id="acp-presets">ACP command presets</h3>
@@ -759,16 +760,15 @@ Plain language. No semicolons. No em dashes. No hedging.</textarea>
 
 <section id="presence">
   <h2>Presence and fallback</h2>
-  <p id="attached-meaning"><code>agentAttached</code> means redline can answer. Sources: a bound reviewer, a running worker, or an in-flight <code>?wait=</code> long-poll. Plugin <code>wait_for_feedback</code> stays when a lane is <code>none</code> and for skill-only installs.</p>
-  <p id="plugin-create">OpenCode / pi <code>create_artifact</code> passes origin when the execute context has a session id. If the plugin context lacks it, add a filled-in argument. After create, do <strong>not</strong> call wait when the reviewer adapter is not <code>none</code>. Return the review URL and stop.</p>
+  <p id="attached-meaning"><code>agentAttached</code> means redline can answer. Sources: a bound reviewer, a running worker, or an in-flight <code>?wait=</code> long-poll (HTTP only, kept for debugging and raw clients). No host plugin registers a wait tool.</p>
+  <p id="plugin-create">OpenCode / pi <code>create_artifact</code> passes origin when the execute context has a session id. If the plugin context lacks it, add a filled-in argument. After create, never call wait. Return the review URL and stop.</p>
 </section>
 
 <section id="skill">
   <h2>Skill change</h2>
   <ol id="skill-steps">
-    <li>Author HTML. Call <code>create_artifact</code>. Give the user the URL.</li>
-    <li>If reviewer adapter is set: stop. Live replies and Iterate happen in the browser.</li>
-    <li>If not: existing wait loop (two empty waits, then stop).</li>
+    <li>Author HTML. Call <code>create_artifact</code>. Give the user the URL. Stop.</li>
+    <li>Live replies and Iterate happen in the browser, on the server's lanes.</li>
     <li>Optional: user returns to the origin chat. That chat already has the artifact id from step 1. Notify lines are extra, not required for awareness.</li>
   </ol>
 </section>

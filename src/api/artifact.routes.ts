@@ -43,7 +43,7 @@ import {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
-// Presence: how many wait_for_feedback long-polls are in flight per artifact.
+// Presence: how many feedback long-polls (?wait=) are in flight per artifact.
 // In memory only. Gates the thinking placeholder and the shell's Iterate
 // button — the two places that must be honest about the agent listening.
 const waitingAgents = new Map<string, number>()

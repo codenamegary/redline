@@ -1,16 +1,16 @@
 // Shared response copy for the redline plugins (opencode plugin and pi
-// extension). When the redline server runs reviewer/worker lanes, the agent
-// that created the artifact must stop driving the loop: the server-side
-// agents handle live replies and iteration duties, so wait_for_feedback
-// would park a second agent next to them.
+// extension). Redline runs the review loop on its own reviewer and worker
+// lanes, so the agent that created the artifact always stops after create:
+// share the review URL and hand the loop over. Notify (when on) posts a
+// one-line status into the origin session instead of waking a wait loop.
 
 export type ResponseSummary = {
   id: string
   current: string
   status: string
   reviewUrl: string
-  // Phase-5 summary field. Undefined on older servers, treated as "none":
-  // the creating agent keeps the wait_for_feedback loop.
+  // Summary field. Undefined on older servers, treated as "none". The host
+  // stops either way; the flag only changes the copy's explanation.
   reviewer?: "none" | "starting" | "idle"
 }
 
@@ -28,16 +28,24 @@ export const asResponseSummary = (summary: ResponseSummary): ResponseSummary => 
   reviewer: summary.reviewer,
 })
 
+const stopLine =
+  "Give the user the review URL and stop. Redline runs the review loop: do not wait for feedback, reply in threads, or publish."
+
 const reviewerConfiguredLine =
-  "Reviewer configured on the redline server: give the user the review URL and stop. Do not call wait_for_feedback. The server's reviewer and worker agents handle live replies and iteration duties."
+  "Reviewer configured on the redline server: " +
+  stopLine +
+  " The server's reviewer and worker agents handle live replies and iteration duties."
+
+const lanesOffLine =
+  "No reviewer lane is configured: " +
+  stopLine +
+  " If the user asks you to address feedback later, read it with get_feedback and publish with update_artifact on request."
 
 export const buildCreateResponseText = (summary: ResponseSummary): string =>
   [
     "Artifact created: " + summary.id + " (" + summary.current + ")",
     "Review URL: " + summary.reviewUrl,
-    hasServerReviewer(summary)
-      ? reviewerConfiguredLine
-      : "Give this URL to the user, then call wait_for_feedback: comments wake you for replies only, the user's Iterate submits a batch for you to publish, approval means done for now.",
+    hasServerReviewer(summary) ? reviewerConfiguredLine : lanesOffLine,
   ].join("\n")
 
 export const buildUpdateResponseText = (summary: ResponseSummary): string =>
@@ -50,4 +58,4 @@ export const buildUpdateResponseText = (summary: ResponseSummary): string =>
   "). Review URL: " +
   summary.reviewUrl +
   ". " +
-  (hasServerReviewer(summary) ? reviewerConfiguredLine : "Call wait_for_feedback next.")
+  (hasServerReviewer(summary) ? reviewerConfiguredLine : lanesOffLine)
