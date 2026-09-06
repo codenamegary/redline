@@ -4,6 +4,7 @@
   "description": "Local review server for AI-generated design artifacts. The agent renders, the human redlines.",
   "type": "module",
   "license": "MIT",
+  "packageManager": "bun@1.4.2",
   "keywords": [
     "pi-package"
   ],
