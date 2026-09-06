@@ -116,7 +116,6 @@ curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.s
 
 ```
 ~/.redline/
-├── server.json                     # pid + port of the running daemon
 ├── server.log                      # daemon output
 ├── settings.json                   # review agent, worker agent, notify (edit via /settings)
 ├── app/                            # self-managed copy of redline (created by install.sh)

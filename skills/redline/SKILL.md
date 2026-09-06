@@ -68,7 +68,7 @@ Skill text updates come from the skills CLI (`npx skills update`). Do not ask th
 
 ## Without native tools
 
-The server speaks plain HTTP. Discover it from `~/.redline/server.json` (host and port; default `http://127.0.0.1:4739`). If nothing answers on `/api/v1/health`, bootstrap it (above).
+The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLINE_PORT`). To check it, probe `/api/v1/health`. If nothing answers, bootstrap it (above).
 
 ```bash
 # create

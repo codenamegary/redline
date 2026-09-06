@@ -1,4 +1,3 @@
-import { writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { parseArgs } from "node:util"
@@ -38,15 +37,6 @@ const main = async (): Promise<void> => {
   const address = app.server.address()
   const boundPort = typeof address === "object" && address !== null ? address.port : port
   const boundHost = typeof address === "object" && address !== null ? address.address : host
-
-  await writeFile(
-    join(home, "server.json"),
-    JSON.stringify(
-      { pid: process.pid, port: boundPort, host: boundHost, startedAt: new Date().toISOString() },
-      null,
-      2,
-    ) + "\n",
-  )
 
   console.log("redline ready: http://" + boundHost + ":" + String(boundPort) + " (home: " + home + ")")
 

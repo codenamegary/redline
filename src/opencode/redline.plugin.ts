@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, readFile } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -22,7 +22,7 @@ import {
 // user asks it to create or publish an artifact. Origin is stored as
 // { host: "opencode", sessionId } for those pings. The daemon is lazily
 // bootstrapped on first use: app found or cloned into ~/.redline/app,
-// install.sh, rediscovered via ~/.redline/server.json.
+// install.sh, discovered via a health probe on 127.0.0.1:$REDLINE_PORT (default 4739).
 
 const repoUrl = process.env.REDLINE_REPO ?? "https://github.com/codenamegary/redline.git"
 
@@ -42,10 +42,6 @@ const looksLikeApp = (dir: string): boolean =>
   existsSync(join(dir, "src", "main.ts")) && existsSync(join(dir, "install.sh"))
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
-const ServerInfoSchema = z.object({ host: z.string(), port: z.number().int() })
-
-type ServerInfo = z.infer<typeof ServerInfoSchema>
 
 const SummarySchema = z.object({
   id: z.string(),
@@ -105,21 +101,8 @@ type FeedbackView = z.infer<typeof FeedbackViewSchema>
 
 const ProblemSchema = z.object({ title: z.string(), detail: z.string().optional() })
 
-const readServerInfo = async (): Promise<ServerInfo | undefined> => {
-  try {
-    const raw = await readFile(join(homeDir(), "server.json"), "utf8")
-    const parsed: unknown = JSON.parse(raw)
-    const result = ServerInfoSchema.safeParse(parsed)
-    return result.success ? result.data : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const baseUrlFor = (info: ServerInfo | undefined): string => {
-  const rawHost = info?.host === "0.0.0.0" ? "127.0.0.1" : info?.host
-  return "http://" + (rawHost ?? "127.0.0.1") + ":" + String(info?.port ?? 4739)
-}
+const baseUrl = (): string =>
+  "http://127.0.0.1:" + String(process.env.REDLINE_PORT ?? "4739")
 
 const probe = async (base: string): Promise<boolean> => {
   try {
@@ -201,11 +184,9 @@ const ensureDaemon = async (): Promise<string> => {
   if (existsSync(installer)) {
     await runCommand("bash", [installer, "--ensure-daemon"], root, 300000)
   } else {
-    const base = baseUrlFor(await readServerInfo())
-    if (!(await probe(base))) await spawnDaemon(root)
+    if (!(await probe(baseUrl()))) await spawnDaemon(root)
   }
-  const base = baseUrlFor(await readServerInfo())
-  daemonReady = await pollUntilReady(base, 120)
+  daemonReady = await pollUntilReady(baseUrl(), 120)
   return daemonReady
 }
 

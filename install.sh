@@ -79,16 +79,8 @@ fi
 
 # ---------- server discovery helpers ----------
 
-server_field() {
-  local field="$1" file="$REDLINE_HOME/server.json"
-  [ -f "$file" ] || return 0
-  tr ',' '\n' < "$file" | sed -n 's/.*"'"$field"'"[[:space:]]*:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}.*/\1/p' | head -n1
-}
-
 server_port() {
-  local port
-  port="$(server_field port)"
-  echo "${port:-${REDLINE_PORT:-4739}}"
+  echo "${REDLINE_PORT:-4739}"
 }
 
 health_url() { echo "http://127.0.0.1:$(server_port)/api/v1/health"; }
@@ -96,15 +88,11 @@ health_url() { echo "http://127.0.0.1:$(server_port)/api/v1/health"; }
 healthy() { curl -fsS --max-time 2 "$(health_url)" >/dev/null 2>&1; }
 
 stop_daemon() {
-  local pid
-  pid="$(server_field pid)"
-  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 1 20); do
-      kill -0 "$pid" 2>/dev/null || break
-      sleep 0.25
-    done
-  fi
+  pkill -f "src/main.ts serve" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    pgrep -f "src/main.ts serve" >/dev/null 2>&1 || break
+    sleep 0.25
+  done
 }
 
 start_daemon() {

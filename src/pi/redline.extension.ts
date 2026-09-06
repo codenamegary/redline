@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process"
 import { existsSync } from "node:fs"
-import { mkdir, readFile } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -28,10 +28,6 @@ const looksLikeApp = (dir: string): boolean =>
 const homeDir = (): string => process.env.REDLINE_HOME ?? join(homedir(), ".redline")
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
-
-const ServerInfoSchema = z.object({ host: z.string(), port: z.number().int() })
-
-type ServerInfo = z.infer<typeof ServerInfoSchema>
 
 const SummarySchema = z.object({
   id: z.string(),
@@ -91,21 +87,8 @@ type FeedbackView = z.infer<typeof FeedbackViewSchema>
 
 const ProblemSchema = z.object({ title: z.string(), detail: z.string().optional() })
 
-const readServerInfo = async (): Promise<ServerInfo | undefined> => {
-  try {
-    const raw = await readFile(join(homeDir(), "server.json"), "utf8")
-    const parsed: unknown = JSON.parse(raw)
-    const result = ServerInfoSchema.safeParse(parsed)
-    return result.success ? result.data : undefined
-  } catch {
-    return undefined
-  }
-}
-
-const baseUrlFor = (info: ServerInfo | undefined): string => {
-  const rawHost = info?.host === "0.0.0.0" ? "127.0.0.1" : info?.host
-  return "http://" + (rawHost ?? "127.0.0.1") + ":" + String(info?.port ?? 4739)
-}
+const baseUrl = (): string =>
+  "http://127.0.0.1:" + String(process.env.REDLINE_PORT ?? "4739")
 
 const probe = async (base: string): Promise<boolean> => {
   try {
@@ -187,11 +170,9 @@ const ensureDaemon = async (): Promise<string> => {
   if (existsSync(installer)) {
     await runCommand("bash", [installer, "--ensure-daemon"], root, 300000)
   } else {
-    const base = baseUrlFor(await readServerInfo())
-    if (!(await probe(base))) await spawnDaemon(root)
+    if (!(await probe(baseUrl()))) await spawnDaemon(root)
   }
-  const base = baseUrlFor(await readServerInfo())
-  daemonReady = await pollUntilReady(base, 120)
+  daemonReady = await pollUntilReady(baseUrl(), 120)
   return daemonReady
 }
 
