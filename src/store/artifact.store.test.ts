@@ -287,6 +287,10 @@ describe("artifact store", () => {
       body: "resolved one",
       author: "user",
     })
+    // ISO timestamps have millisecond precision; back-to-back appends can
+    // land in the same ms and make the newest-first sort ambiguous. Pause so
+    // createdAt ordering is deterministic.
+    await new Promise((resolve) => setTimeout(resolve, 10))
     const second = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
