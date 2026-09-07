@@ -141,16 +141,20 @@ export const clientScript = `(function () {
 
   function numberedThreads() {
     var out = []
-    var n = 0
     state.threads.forEach(function (thread) {
       if (thread.status !== "open" || !thread.anchor || !thread.anchor.rect) return
       // Pins are placed on the version they were pinned on; skip them when a
       // different version is in the preview.
       if (thread.anchorVersion && thread.anchorVersion !== state.version) return
-      n += 1
-      out.push({ thread: thread, number: n })
+      out.push(thread)
     })
-    return out
+    // Oldest pin gets number 1. New comments sort after every existing one,
+    // so adding a comment never reshuffles earlier markers. id breaks ties
+    // for threads created in the same millisecond.
+    out.sort(function (a, b) {
+      return a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    })
+    return out.map(function (thread, index) { return { thread: thread, number: index + 1 } })
   }
 
   function el(tag, cls, text) {
