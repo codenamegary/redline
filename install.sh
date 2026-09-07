@@ -2,18 +2,27 @@
 #
 # redline installer/bootstrap.
 #
-#   install.sh                 ensure the app (clone to ~/.redline/app if needed),
-#                              ensure deps + runtime, start the daemon, wait for health
-#   install.sh --ensure-daemon pull latest (if git), refresh deps, start or restart
-#                              the daemon when needed. Used by the pi/opencode tools.
-#   install.sh --update        same as ensure-daemon after ensure_app (clone if missing)
+#   install.sh                 install the app and start the daemon, wait for health
+#   install.sh --ensure-daemon make sure the daemon is running and current.
+#                              Used by the pi/opencode tools.
+#   install.sh --update        same as ensure-daemon (updates to the latest release
+#                              when one exists; pulls the source checkout in source mode)
+#   install.sh --from-source   run the daemon from source instead of the prebuilt
+#                              release binary (needs git + bun or node 22+)
 #   install.sh --with-pi       also wire ~/.pi/agent/settings.json (extension + skill)
 #   install.sh --with-opencode also symlink the plugin + register the skill for opencode
 #
+# Binary mode (default): downloads the prebuilt release binary into $REDLINE_HOME/bin.
+# Only needs curl + tar. Source mode (running from a checkout, REDLINE_APP set,
+# or --from-source): needs git + bun (or node 22+); the pi/opencode wiring always
+# clones the source to $REDLINE_HOME/app because the extension/plugin live there.
+#
 # Environment:
-#   REDLINE_HOME   data home (default ~/.redline)
-#   REDLINE_APP    app directory (default: this checkout if run from one, else ~/.redline/app)
-#   REDLINE_REPO   git URL to clone (default: https://github.com/codenamegary/redline.git)
+#   REDLINE_HOME     data home (default ~/.redline); binary lands in $REDLINE_HOME/bin
+#   REDLINE_APP      app directory; setting it forces source mode
+#   REDLINE_REPO     git URL to clone (default: https://github.com/codenamegary/redline.git)
+#   REDLINE_VERSION  pin a release tag (e.g. v0.2.0; default: latest release)
+#   REDLINE_RELEASE_BASE  override the release download base (default: GitHub releases)
 #   REDLINE_PORT / REDLINE_HOST  passed through to the daemon
 #
 set -euo pipefail
@@ -27,54 +36,65 @@ die()  { printf 'error: %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# ---------- locate the app directory ----------
+REPO_SLUG="$(printf '%s' "$REPO_URL" | sed -e 's#.*github.com/##' -e 's#\.git$##')"
+RELEASE_BASE="${REDLINE_RELEASE_BASE:-https://github.com/$REPO_SLUG/releases}"
+BIN_DIR="$REDLINE_HOME/bin"
+BIN_PATH="$BIN_DIR/redline"
+VERSION_FILE="$BIN_DIR/VERSION"
+
+# ---------- locate the app directory / pick the mode ----------
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 
-if [ -n "${REDLINE_APP:-}" ]; then
-  APP_DIR="$REDLINE_APP"
-elif [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/src/main.ts" ]; then
-  APP_DIR="$SCRIPT_DIR"
-else
-  APP_DIR="$REDLINE_HOME/app"
-fi
-
 MODE="install"
+FROM_SOURCE=0
 WIRE_PI=0
 WIRE_OPENCODE=0
 for arg in "$@"; do
   case "$arg" in
     --ensure-daemon)  MODE="ensure-daemon" ;;
     --update)         MODE="update" ;;
+    --from-source)    FROM_SOURCE=1 ;;
     --with-pi)        WIRE_PI=1 ;;
     --with-opencode)  WIRE_OPENCODE=1 ;;
     --help|-h)
-      sed -n '2,16p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
+      sed -n '2,26p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *) die "unknown argument: $arg (try --help)" ;;
   esac
 done
 
-[ -n "${SCRIPT_DIR:-}" ] || true
+if [ -n "${REDLINE_APP:-}" ]; then
+  APP_DIR="$REDLINE_APP"
+  FROM_SOURCE=1
+elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$REDLINE_HOME/app" ] && [ -f "$SCRIPT_DIR/src/main.ts" ]; then
+  APP_DIR="$SCRIPT_DIR"
+  FROM_SOURCE=1
+else
+  APP_DIR="$REDLINE_HOME/app"
+fi
 
-# ---------- runtime: bun, or node 22+, or bootstrap a user-local bun ----------
+# ---------- runtime: bun, or node 22+, or bootstrap a user-local bun (source mode) ----------
 
 BUN=""
 NODE_OK=0
 
-if have bun; then
-  BUN="$(command -v bun)"
-elif have node && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]; then
-  NODE_OK=1
-fi
+if [ "$FROM_SOURCE" -eq 1 ]; then
+  have curl || die "curl is required to install redline"
+  if have bun; then
+    BUN="$(command -v bun)"
+  elif have node && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]; then
+    NODE_OK=1
+  fi
 
-if [ -z "$BUN" ] && [ "$NODE_OK" -ne 1 ]; then
-  say "no bun and no node 22+ found — installing bun to ~/.bun (user-local, no sudo)"
-  [ -f "$HOME/.bun/bin/bun" ] || curl -fsSL https://bun.sh/install | bash
-  [ -x "$HOME/.bun/bin/bun" ] || die "bun installation failed; install bun (https://bun.sh) or node 22+ and re-run"
-  export PATH="$HOME/.bun/bin:$PATH"
-  BUN="$HOME/.bun/bin/bun"
+  if [ -z "$BUN" ] && [ "$NODE_OK" -ne 1 ]; then
+    say "no bun and no node 22+ found — installing bun to ~/.bun (user-local, no sudo)"
+    [ -f "$HOME/.bun/bin/bun" ] || curl -fsSL https://bun.sh/install | bash
+    [ -x "$HOME/.bun/bin/bun" ] || die "bun installation failed; install bun (https://bun.sh) or node 22+ and re-run"
+    export PATH="$HOME/.bun/bin:$PATH"
+    BUN="$HOME/.bun/bin/bun"
+  fi
 fi
 
 # ---------- server discovery helpers ----------
@@ -87,25 +107,36 @@ health_url() { echo "http://127.0.0.1:$(server_port)/api/v1/health"; }
 
 healthy() { curl -fsS --max-time 2 "$(health_url)" >/dev/null 2>&1; }
 
+running_version() {
+  curl -fsS --max-time 2 "$(health_url)" 2>/dev/null | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' || true
+}
+
 stop_daemon() {
   pkill -f "src/main.ts serve" 2>/dev/null || true
+  pkill -f "bin/redline serve" 2>/dev/null || true
   for _ in $(seq 1 20); do
-    pgrep -f "src/main.ts serve" >/dev/null 2>&1 || break
-    sleep 0.25
+    pgrep -f "src/main.ts serve" >/dev/null 2>&1 && continue
+    pgrep -f "bin/redline serve" >/dev/null 2>&1 && continue
+    break
   done
 }
 
 start_daemon() {
   mkdir -p "$REDLINE_HOME"
-  (
-    cd "$APP_DIR"
-    if [ -n "$BUN" ]; then
-      nohup "$BUN" run src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
-    else
-      nohup npx -y tsx src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
-    fi
+  if [ "$FROM_SOURCE" -eq 1 ]; then
+    (
+      cd "$APP_DIR"
+      if [ -n "$BUN" ]; then
+        nohup "$BUN" run src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
+      else
+        nohup npx -y tsx src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
+      fi
+      disown 2>/dev/null || true
+    )
+  else
+    nohup "$BIN_PATH" serve --home "$REDLINE_HOME" >> "$REDLINE_HOME/server.log" 2>&1 &
     disown 2>/dev/null || true
-  )
+  fi
 }
 
 wait_health() {
@@ -119,7 +150,60 @@ wait_health() {
   return 1
 }
 
-# ---------- steps ----------
+# ---------- release binary ----------
+
+installed_version() {
+  if [ -f "$VERSION_FILE" ]; then tr -d '[:space:]' < "$VERSION_FILE"; fi
+}
+
+latest_tag() {
+  local target
+  target="$(curl -fsSLI --max-time 10 -o /dev/null -w '%{url_effective}' "$RELEASE_BASE/latest" 2>/dev/null | sed 's#.*/tag/##')" || return 0
+  case "$target" in
+    v[0-9]*) printf '%s' "$target" ;;
+  esac
+}
+
+verify_checksums() {
+  local dir="$1"
+  (
+    cd "$dir"
+    if have sha256sum; then sha256sum -c checksums.txt >/dev/null 2>&1
+    elif have shasum; then shasum -a 256 -c checksums.txt >/dev/null 2>&1
+    else warn "no sha256 tool found; skipping checksum verification"; fi
+  )
+}
+
+download_release() {
+  local version="$1" platform tmp
+  [ -n "$version" ] || die "no release version to download"
+  have tar || die "tar is required to install the redline binary"
+  platform="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+  case "$platform" in
+    linux-x86_64)   platform="linux-x64" ;;
+    linux-aarch64)  platform="linux-arm64" ;;
+    linux-arm64)    platform="linux-arm64" ;;
+    darwin-x86_64)  platform="darwin-x64" ;;
+    darwin-arm64)   platform="darwin-arm64" ;;
+    *) die "no prebuilt binary for $platform — run install.sh --from-source instead" ;;
+  esac
+  tmp="$(mktemp -d)"
+  say "downloading redline v$version ($platform)"
+  curl -fsSL "$RELEASE_BASE/download/v$version/redline-$version-$platform.tar.gz" -o "$tmp/redline-$version-$platform.tar.gz" \
+    || die "could not download redline v$version for $platform from $RELEASE_BASE"
+  if curl -fsSL "$RELEASE_BASE/download/v$version/checksums.txt" -o "$tmp/checksums.txt" 2>/dev/null; then
+    verify_checksums "$tmp" || die "checksum verification failed for redline v$version"
+  else
+    warn "could not download checksums.txt; skipping checksum verification"
+  fi
+  tar -xzf "$tmp/redline-$version-$platform.tar.gz" -C "$tmp"
+  mkdir -p "$BIN_DIR"
+  mv "$tmp/redline-$version-$platform/redline" "$BIN_PATH"
+  printf '%s\n' "$version" > "$VERSION_FILE"
+  rm -rf "$tmp"
+}
+
+# ---------- source checkout ----------
 
 ensure_app() {
   if [ -f "$APP_DIR/src/main.ts" ]; then
@@ -155,7 +239,9 @@ refresh_app() {
   fi
 }
 
-ensure_daemon() {
+# ---------- daemon lifecycle ----------
+
+ensure_daemon_source() {
   local before after
   before="$(app_head)"
   refresh_app
@@ -180,6 +266,45 @@ ensure_daemon() {
   wait_health || die "daemon failed to start (see $REDLINE_HOME/server.log)"
   say "redline ready: $(health_url)"
 }
+
+ensure_daemon_binary() {
+  local desired installed running
+  desired="${REDLINE_VERSION:-$(latest_tag)}"
+  desired="${desired#v}"
+  installed="$(installed_version)"
+
+  if [ -x "$BIN_PATH" ] && [ -n "$installed" ] && [ -n "$desired" ] && [ "$installed" != "$desired" ]; then
+    download_release "$desired"
+    installed="$desired"
+  elif [ ! -x "$BIN_PATH" ] || [ -z "$installed" ]; then
+    if [ -n "$desired" ]; then
+      download_release "$desired"
+      installed="$desired"
+    else
+      die "no redline binary installed and the latest release could not be resolved; set REDLINE_VERSION=<tag> and retry, or run install.sh --from-source"
+    fi
+  else
+    say "redline binary v$installed is up to date"
+  fi
+
+  running="$(running_version)"
+  if healthy && { [ -z "$running" ] || [ "$running" = "$installed" ]; }; then
+    say "redline already running: $(health_url)${running:+ (v$running)}"
+    return 0
+  fi
+  if healthy; then
+    say "upgrading daemon v$running -> v$installed"
+    stop_daemon
+  else
+    stop_daemon
+    say "starting redline daemon"
+  fi
+  start_daemon
+  wait_health || die "daemon failed to start (see $REDLINE_HOME/server.log)"
+  say "redline ready: $(health_url) (v$(running_version))"
+}
+
+# ---------- harness wiring (needs the source checkout) ----------
 
 run_json_edit() {
   local script="$1"; shift
@@ -262,28 +387,37 @@ EOF
 
 # ---------- main ----------
 
+if [ "$FROM_SOURCE" -eq 1 ]; then
+  [ -f "$APP_DIR/src/main.ts" ] || die "no redline app at $APP_DIR (set REDLINE_APP or run install.sh from a checkout)"
+else
+  have curl || die "curl is required to install redline"
+fi
+
 case "$MODE" in
-  ensure-daemon)
-    [ -f "$APP_DIR/src/main.ts" ] || die "no redline app at $APP_DIR (set REDLINE_APP or run install.sh from a checkout)"
-    ensure_daemon
-    ;;
-  update)
-    ensure_app
-    ensure_daemon
-    ;;
-  install)
-    ensure_app
-    ensure_daemon
+  ensure-daemon|update|install)
+    if [ "$FROM_SOURCE" -eq 1 ]; then
+      ensure_daemon_source
+    else
+      ensure_daemon_binary
+    fi
     ;;
 esac
 
+if [ "$WIRE_PI" -eq 1 ] || [ "$WIRE_OPENCODE" -eq 1 ]; then
+  ensure_app
+fi
 if [ "$WIRE_PI" -eq 1 ]; then wire_pi; fi
 if [ "$WIRE_OPENCODE" -eq 1 ]; then wire_opencode; fi
 
-commit="$(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ "$FROM_SOURCE" -eq 1 ]; then
+  label="source ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))"
+else
+  label="binary (v$(installed_version))"
+fi
 say ""
 say "redline is ready ☕"
-say "  app:      $APP_DIR ($commit)"
+say "  app:      $APP_DIR"
+say "  daemon:   $label"
 say "  gallery:  http://127.0.0.1:$(server_port)/"
 say "  home:     $REDLINE_HOME"
 say "  log:      $REDLINE_HOME/server.log"

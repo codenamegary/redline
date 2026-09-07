@@ -4,6 +4,7 @@ import { parseArgs } from "node:util"
 
 import { openStore } from "./store/artifact.store"
 import { buildServer } from "./server"
+import { appVersion } from "./version"
 
 const usage = "usage: redline serve [--port <n>] [--host <addr>] [--home <dir>]"
 
@@ -38,7 +39,12 @@ const main = async (): Promise<void> => {
   const boundPort = typeof address === "object" && address !== null ? address.port : port
   const boundHost = typeof address === "object" && address !== null ? address.address : host
 
-  console.log("redline ready: http://" + boundHost + ":" + String(boundPort) + " (home: " + home + ")")
+  const version = appVersion()
+  console.log(
+    "redline ready" +
+      (version === "dev" ? "" : " (v" + version + ")") +
+      ": http://" + boundHost + ":" + String(boundPort) + " (home: " + home + ")",
+  )
 
   const shutdown = (): void => {
     void app.close().finally(() => process.exit(0))
