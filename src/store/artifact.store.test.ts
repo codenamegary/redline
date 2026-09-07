@@ -313,6 +313,53 @@ describe("artifact store", () => {
     expect(view.threads[1]?.id).toBe(first.id)
     expect(view.threads[1]?.anchorVersion).toBe("v1")
   })
+
+  it("yields stable marker numbers when threads sort oldest-first by createdAt", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    // Anchor-bearing open threads, the kind the review UI numbers.
+    const anchor = { selector: "#pin", text: "pin", rect: { x: 1, y: 2, width: 3, height: 4 } }
+    const first = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor,
+      body: "one",
+      author: "user",
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const second = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor,
+      body: "two",
+      author: "user",
+    })
+    // The UI derives numbers from an ascending createdAt sort (id breaks
+    // ties). The older threads must keep numbers 1 and 2 when a newer
+    // comment arrives.
+    const numbers = (view: Awaited<ReturnType<typeof readFeedbackView>>): Map<string, number> =>
+      new Map(
+        [...view.threads]
+          .sort(
+            (a, b) => a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          )
+          .map((thread, index) => [thread.id, index + 1]),
+      )
+    const before = numbers(await readFeedbackView(store, meta.id))
+    expect(before.get(first.id)).toBe(1)
+    expect(before.get(second.id)).toBe(2)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const third = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor,
+      body: "three",
+      author: "user",
+    })
+    const after = numbers(await readFeedbackView(store, meta.id))
+    expect(after.get(first.id)).toBe(1)
+    expect(after.get(second.id)).toBe(2)
+    expect(after.get(third.id)).toBe(3)
+  })
+
   it("rejects threads pinned on unknown versions", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
