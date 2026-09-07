@@ -11,7 +11,7 @@ export type ShellData = {
   apiBase: string
 }
 
-const clientScript = `(function () {
+export const clientScript = `(function () {
   "use strict"
   var data = JSON.parse(document.getElementById("redline-data").textContent)
   var frame = document.getElementById("frame")
@@ -73,6 +73,13 @@ const clientScript = `(function () {
     return null
   }
 
+  function currentApprovedAt() {
+    for (var i = 0; i < state.versions.length; i++) {
+      if (state.versions[i].version === state.current) return state.versions[i].approvedAt
+    }
+    return undefined
+  }
+
   function refresh() {
     return api(feedbackUrl()).then(function (view) {
       state.threads = view.threads
@@ -122,8 +129,9 @@ const clientScript = `(function () {
   function renderHeader() {
     var iterating = state.status === "iterating"
     var review = state.status === "review"
-    statusEl.textContent = iterating ? "iterating" : review ? "in review" : "draft"
-    statusEl.className = "pill " + state.status
+    var approved = review && currentApprovedAt() !== undefined
+    statusEl.textContent = approved ? "approved" : iterating ? "iterating" : review ? "in review" : "draft"
+    statusEl.className = "pill " + (approved ? "approved" : state.status)
     presenceEl.className = "presence " + (iterating ? "working" : state.attached ? "on" : "off")
     presenceLabel.textContent = state.workerRunning
       ? "worker running"
@@ -140,8 +148,13 @@ const clientScript = `(function () {
       : review && !state.attached
         ? "Agent not attached - nudge it in chat, then Iterate"
         : "Send open threads to the agent as one batch"
-    approveBtn.disabled = !review
-    approveBtn.title = review ? "Done for now: approve " + state.current + " (always iterable later)" : "Finish the iterating round first"
+    approveBtn.disabled = !review || approved
+    approveBtn.textContent = approved ? "Approved" : "Approve"
+    approveBtn.title = approved
+      ? state.current + " approved \\u2014 done for now (Iterate to continue)"
+      : review
+        ? "Done for now: approve " + state.current + " (always iterable later)"
+        : "Finish the iterating round first"
     generalBtn.disabled = !review
     pinBtn.disabled = !review || state.pinMode
     if (!review && state.pinMode) setPinMode(false)
@@ -478,6 +491,7 @@ const shellStyle = `
   .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; border: 1px solid; white-space: nowrap }
   .pill.review { color: #f5a524; border-color: #6b5320; background: rgba(245, 165, 36, .08) }
   .pill.iterating { color: #f5a524; border-color: #6b5320; background: rgba(245, 165, 36, .08) }
+  .pill.approved { color: #46d68c; border-color: #2a5c40; background: rgba(70, 214, 140, .08) }
   .pill.draft { color: #9aa3b2; border-color: #3a4152; background: rgba(154, 163, 178, .08) }
   .presence { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid #3a4152; border-radius: 999px; padding: 2px 10px; color: #9aa3b2; white-space: nowrap }
   .presence .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b7487 }
@@ -547,6 +561,14 @@ const shellStyle = `
 export const renderShellPage = (data: ShellData): string => {
   const dataJson = JSON.stringify(data).replaceAll("<", "\\u003c")
   const title = escapeHtml(data.title)
+  const approvedAt = data.versions.find((entry) => entry.version === data.current)?.approvedAt
+  const statusPill = approvedAt !== undefined
+    ? '<span id="status" class="pill approved">approved</span>'
+    : data.status === "iterating"
+      ? '<span id="status" class="pill iterating">iterating</span>'
+      : data.status === "review"
+        ? '<span id="status" class="pill review">in review</span>'
+        : '<span id="status" class="pill draft">draft</span>'
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -559,7 +581,7 @@ export const renderShellPage = (data: ShellData): string => {
 <header>
   <a class="brand" href="/">redline</a>
   <span id="title">${title}</span>
-  <span id="status" class="pill review">in review</span>
+  ${statusPill}
   <span id="presence" class="presence off"><span class="dot"></span><span id="presence-label">checking&hellip;</span></span>
   <label>Version <select id="version"></select></label>
   <span class="spacer"></span>
