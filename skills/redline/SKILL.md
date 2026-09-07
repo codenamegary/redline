@@ -21,7 +21,7 @@ Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPD
 
 1. Decide the artifact's shape: architecture doc, decision record, API contract, data flow, comparison, UI mockup, explainer. One artifact = one idea. Split unrelated topics into separate artifacts.
 2. Author a complete single-file HTML document:
-   - All CSS and JS inline. No external requests: no CDNs, web fonts, or remote images. Use inline SVG for diagrams.
+   - Load Tailwind via the browser CDN and start from the base skeleton below. The Tailwind CDN script is the only external request allowed: all other CSS and JS stays inline, inline SVG for diagrams, no remote images.
    - Give every major section, diagram node, table, and embedded UI demo a stable `id`. Pins reference these selectors, so stable ids keep feedback attached across versions.
    - Readability first: system font stack, clear headings, generous line height, responsive down to ~1000px. Pick dark or light deliberately.
    - Interactive bits are encouraged when they explain: toggles, tabs, step-throughs, small simulations. Keep them dependency-free.
@@ -32,6 +32,44 @@ Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPD
 4. Read the draft. Call `create_artifact` with the file contents as `html`. Pass the string, not a path. The tool returns the review URL. Same rule for `update_artifact` when the user asked you to publish.
 5. Delete the draft file. Remove `.redline-drafts/` if it is empty. Do not commit the draft.
 6. Share the URL, say what to look at, and stop. The response text confirms this whether or not a reviewer lane is configured.
+
+## Base skeleton (Tailwind via CDN)
+
+Start every artifact from this skeleton. Tailwind's browser build compiles utility classes at load time, so there is nothing to build and no other dependency.
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title}</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      /* example tokens — rename, revalue, add freely.
+         --color-* tokens generate utilities: bg-accent, text-accent-soft, ... */
+      --color-accent:      oklch(0.55 0.2 260);
+      --color-accent-soft: oklch(0.95 0.04 260);
+    }
+    /* examples, not a framework: copy only what you use, or define your own. */
+    .rl-card     { @apply rounded-xl border border-black/10 bg-white p-5; }
+    .rl-callout  { @apply rounded-lg border-l-4 border-accent bg-accent-soft/40 p-4; }
+    .rl-endpoint { @apply rounded-lg bg-zinc-900 p-4 font-mono text-sm text-zinc-100; }
+    .rl-badge    { @apply inline-block rounded-full bg-accent px-2 py-0.5 text-xs font-semibold; }
+    .rl-table    { @apply w-full text-sm; }
+    .rl-table th { @apply border-b py-2 text-left font-semibold opacity-60; }
+    .rl-table td { @apply border-b border-black/5 py-2; }
+    .rl-kbd      { @apply rounded border border-black/20 bg-white px-1.5 font-mono text-xs; }
+  </style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased">
+  <!-- header: title plus a one-paragraph summary, then content -->
+</body>
+</html>
+```
+
+These classes are a menu, not a framework. Copy only the ones you use; delete or restyle the rest. Define your own component classes in the same block whenever markup repeats — name them however you like, the `rl-` prefix is convention only. Any utility composes with or overrides a component class (`class="rl-card p-10"`). Theme tokens exist so one value re-skins the whole artifact; pick accent colors that fit the content. Everything Tailwind offers is available: the skeleton is a starting point, never a constraint.
 
 ## Tools
 

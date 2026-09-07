@@ -270,7 +270,7 @@ export const RedlinePlugin: Plugin = async () => {
           html: tool.schema
             .string()
             .describe(
-              "Complete self-contained HTML document: inline CSS and JS, inline SVG diagrams, no external requests",
+              "Complete HTML document. Tailwind CDN script allowed (https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4); all other CSS and JS inline, inline SVG diagrams, no other external requests",
             ),
         },
         async execute(params, ctx) {
