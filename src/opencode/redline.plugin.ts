@@ -15,7 +15,7 @@ import {
 } from "../agent.response"
 
 // opencode plugin for the redline review server. Mirrors src/pi/redline.extension.ts:
-// same four tool names, same HTTP API (see skills/redline/SKILL.md). After create,
+// same tool names, same HTTP API (see skills/redline/SKILL.md). After create,
 // share the URL and stop: redline's reviewer and worker lanes run the review loop,
 // and notify (when on) posts a one-line status ping into this session via the
 // OpenCode HTTP server. The host never waits, replies, or publishes unless the
@@ -55,6 +55,14 @@ const SummarySchema = z.object({
 })
 
 type Summary = z.infer<typeof SummarySchema>
+
+const AssetSchema = z.object({
+  artifactId: z.string(),
+  version: z.string(),
+  filename: z.string(),
+  size: z.number(),
+  url: z.string(),
+})
 
 const ThreadSchema = z.object({
   id: z.string(),
@@ -316,6 +324,47 @@ export const RedlinePlugin: Plugin = async () => {
           )
           const summary = SummarySchema.parse(body)
           return buildUpdateResponseText(asResponseSummary(summary))
+        },
+      }),
+
+      upload_artifact_asset: tool({
+        description:
+          "Attach a static asset (PNG, JPG, JPEG, GIF, WebP, SVG, AVIF; 5 MB max decoded) to one version of a redline artifact. Upload before publishing the HTML that references the file, then reference it with a relative path (src=\"hero.png\"); it is served at /a/<artifactId>/<version>/<filename>.",
+        args: {
+          artifactId: tool.schema.string().describe("Artifact id from create_artifact"),
+          version: tool.schema.string().describe("Target version (v1, v2, ...)"),
+          filename: tool.schema
+            .string()
+            .describe("Asset filename, e.g. hero.png. Letters, digits, dot, dash, underscore only."),
+          contentBase64: tool.schema
+            .string()
+            .describe("Base64-encoded asset bytes (5 MB max decoded)"),
+        },
+        async execute(params) {
+          const base = await ensureDaemon()
+          const body = await requestJson(
+            base,
+            "/api/v1/artifacts/" + encodeURIComponent(params.artifactId) + "/assets",
+            jsonInit("POST", {
+              version: params.version,
+              filename: params.filename,
+              data: params.contentBase64,
+            }),
+          )
+          const asset = AssetSchema.parse(body)
+          return (
+            "Uploaded " +
+            asset.filename +
+            " (" +
+            String(asset.size) +
+            " bytes) to " +
+            asset.artifactId +
+            " " +
+            asset.version +
+            " — reference it as src=\"" +
+            asset.filename +
+            "\""
+          )
         },
       }),
 
