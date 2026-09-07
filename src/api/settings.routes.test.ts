@@ -64,6 +64,7 @@ describe("settings api", () => {
     expect(body.worker.acpCommand).toEqual(["opencode", "acp"])
     expect(body.notifyOrigin).toBe(true)
     expect(body.opencodeServerUrl).toBe("http://127.0.0.1:4096")
+    expect(body.imageGen).toEqual({ enabled: false, agent: "", model: "" })
     expect(body.prompts.reviewer).toBe(DEFAULT_REVIEWER_PROMPT)
     expect(body.prompts.worker).toBe(DEFAULT_WORKER_PROMPT)
   })
@@ -106,6 +107,62 @@ describe("settings api", () => {
     const effective = RedlineSettingsSchema.parse(read.json())
     expect(effective.prompts.reviewer).toBe("my reviewer prompt")
     expect(effective.prompts.worker).toBe(DEFAULT_WORKER_PROMPT)
+  })
+
+  it("saves imageGen config and echoes it back", async () => {
+    const { app, home } = makeApp()
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/v1/settings",
+      payload: {
+        reviewer: lane(["true"]),
+        worker: lane(["true"]),
+        imageGen: { enabled: true, agent: "opencode image", model: "gpt-image-1" },
+        prompts: { reviewer: "", worker: "" },
+      },
+    })
+    expect(response.statusCode).toBe(200)
+    const saved = RedlineSettingsSchema.parse(response.json())
+    expect(saved.imageGen).toEqual({ enabled: true, agent: "opencode image", model: "gpt-image-1" })
+    expect(readDisk(home).imageGen).toEqual({ enabled: true, agent: "opencode image", model: "gpt-image-1" })
+
+    // A PUT without imageGen (older client) falls back to defaults per field.
+    const legacy = await app.inject({
+      method: "PUT",
+      url: "/api/v1/settings",
+      payload: {
+        reviewer: lane(["true"]),
+        worker: lane(["true"]),
+        prompts: { reviewer: "", worker: "" },
+      },
+    })
+    expect(legacy.statusCode).toBe(200)
+    expect(RedlineSettingsSchema.parse(legacy.json()).imageGen).toEqual({
+      enabled: false,
+      agent: "",
+      model: "",
+    })
+  })
+
+  it("loads imageGen defaults for a settings file written before imageGen existed", async () => {
+    const { app, home } = makeApp()
+    writeFileSync(
+      settingsPath(home),
+      JSON.stringify({
+        reviewer: lane(["true"]),
+        worker: lane(["true"]),
+        notifyOrigin: false,
+        opencodeServerUrl: "http://127.0.0.1:4096",
+        prompts: { reviewer: "", worker: "" },
+      }),
+    )
+    const response = await app.inject({ method: "GET", url: "/api/v1/settings" })
+    expect(response.statusCode).toBe(200)
+    const body = RedlineSettingsSchema.parse(response.json())
+    expect(body.imageGen).toEqual({ enabled: false, agent: "", model: "" })
+    // Everything the old file did carry survives the read.
+    expect(body.reviewer.acpCommand).toEqual(["true"])
+    expect(body.notifyOrigin).toBe(false)
   })
 
   it("rejects unknown adapters with problem details", async () => {

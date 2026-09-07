@@ -23,7 +23,7 @@ describe("ui routes", () => {
     const response = await app.inject({ method: "GET", url: "/settings" })
     expect(response.statusCode).toBe(200)
     expect(response.headers["content-type"]).toContain("text/html")
-    for (const marker of ["Settings", "Reviewer", "Worker", "Notify"]) {
+    for (const marker of ["Settings", "Reviewer", "Worker", "Notify", "Image Gen"]) {
       expect(response.body).toContain(marker)
     }
     // First paint shows only the active pane: inactive panes must carry the
@@ -31,6 +31,11 @@ describe("ui routes", () => {
     expect(response.body).toContain('<section id="pane-reviewer" role="tabpanel" aria-labelledby="tab-reviewer">')
     expect(response.body).toContain('<section id="pane-worker" role="tabpanel" aria-labelledby="tab-worker" hidden>')
     expect(response.body).toContain('<section id="pane-notify" role="tabpanel" aria-labelledby="tab-notify" hidden>')
+    // Image Gen pane: config-only toggle plus agent/model fields.
+    expect(response.body).toContain('<section id="pane-imagegen" role="tabpanel" aria-labelledby="tab-imagegen" hidden>')
+    expect(response.body).toContain('<input type="checkbox" id="imagegen-enabled">')
+    expect(response.body).toContain('id="imagegen-agent"')
+    expect(response.body).toContain('id="imagegen-model"')
   })
 
   it("links Settings from the gallery header", async () => {
