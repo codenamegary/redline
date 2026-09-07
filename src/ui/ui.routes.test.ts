@@ -37,6 +37,23 @@ describe("ui routes", () => {
     expect(response.body).toContain('href="/settings"')
   })
 
+  it("renders the ding-when-done toggle in the shell header", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: { title: "Ding shell", html: "<h1>Ding</h1>" },
+    })
+    expect(created.statusCode).toBe(201)
+    const { id } = created.json() as { id: string }
+    const response = await app.inject({ method: "GET", url: "/a/" + id })
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toContain('<input type="checkbox" id="ding">')
+    expect(response.body).toContain("ding when done")
+    expect(response.body).toContain('localStorage.getItem("redline.ding")')
+    expect(response.body).toContain('localStorage.setItem("redline.ding"')
+    expect(response.body).toContain("maybeDing(prevStatus)")
+  })
+
   it("splits command lines into argv, honoring double quotes", () => {
     // The page embeds this exact source; evaluating it keeps test and
     // browser behavior identical.
