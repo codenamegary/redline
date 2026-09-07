@@ -27,6 +27,7 @@ const clientScript = `(function () {
   var bannerEl = document.getElementById("banner")
   var iterateBtn = document.getElementById("iterate")
   var approveBtn = document.getElementById("approve")
+  var dingBox = document.getElementById("ding")
   var pinBtn = document.getElementById("pin-mode")
   var generalBtn = document.getElementById("general-btn")
   var state = {
@@ -61,6 +62,44 @@ const clientScript = `(function () {
     return { method: method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
   }
 
+  var dingOn = true
+  try { dingOn = localStorage.getItem("redline.ding") !== "off" } catch (e) {}
+  dingBox.checked = dingOn
+  dingBox.addEventListener("change", function () {
+    dingOn = dingBox.checked
+    try { localStorage.setItem("redline.ding", dingOn ? "on" : "off") } catch (e) {}
+  })
+
+  function playDing() {
+    if (!dingOn) return
+    var AudioCtor = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtor) return
+    try {
+      if (!playDing.ctx) playDing.ctx = new AudioCtor()
+      var ctx = playDing.ctx
+      if (ctx.state === "suspended") ctx.resume()
+      var now = ctx.currentTime
+      ;[[880, 0], [1174.66, 0.13]].forEach(function (part) {
+        var osc = ctx.createOscillator()
+        var gain = ctx.createGain()
+        osc.type = "sine"
+        osc.frequency.value = part[0]
+        var start = now + part[1]
+        gain.gain.setValueAtTime(0.0001, start)
+        gain.gain.exponentialRampToValueAtTime(0.2, start + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.45)
+        osc.connect(gain)
+        gain.connect(ctx.destination)
+        osc.start(start)
+        osc.stop(start + 0.5)
+      })
+    } catch (e) {}
+  }
+
+  function maybeDing(prevStatus) {
+    if (prevStatus === "iterating" && state.status === "review") playDing()
+  }
+
   function feedbackUrl() {
     return "/artifacts/" + data.artifactId + "/feedback"
   }
@@ -75,6 +114,7 @@ const clientScript = `(function () {
 
   function refresh() {
     return api(feedbackUrl()).then(function (view) {
+      var prevStatus = state.status
       state.threads = view.threads
       state.status = view.artifactStatus
       state.attached = view.agentAttached === true
@@ -82,6 +122,7 @@ const clientScript = `(function () {
       state.workerRunning = view.workerRunning === true
       state.current = view.current
       state.versions = view.versions
+      maybeDing(prevStatus)
       // Auto-follow: when a new version is published, load it — unless the
       // user deliberately switched to an older version.
       if (state.followCurrent && state.status === "review" && state.current !== state.version) {
@@ -438,6 +479,7 @@ const clientScript = `(function () {
   setInterval(function () {
     if (!composerEl.hidden) return
     api(feedbackUrl()).then(function (view) {
+      var prevStatus = state.status
       var snapshot = JSON.stringify([
         view.artifactStatus,
         view.current,
@@ -456,6 +498,7 @@ const clientScript = `(function () {
       state.workerRunning = view.workerRunning === true
       state.current = view.current
       state.versions = view.versions
+      maybeDing(prevStatus)
       if (state.followCurrent && state.status === "review" && state.current !== state.version) {
         switchPreview(state.current)
       }
@@ -539,6 +582,7 @@ const shellStyle = `
   button.small { padding: 4px 8px; font-size: 12px }
   select { background: #1d2230; color: #e6e8ee; border: 1px solid #333b4d; border-radius: 6px; padding: 5px 8px; font: inherit; max-width: 220px }
   label { color: #9aa3b2; font-size: 12px; display: flex; align-items: center; gap: 6px }
+  #ding { accent-color: #e5484d; cursor: pointer; margin: 0 }
   .brief { border: 1px solid #262b36; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #9aa3b2 }
   .brief summary { cursor: pointer; color: #c6cbd6 }
   .brief p { margin: 8px 0 0; white-space: pre-wrap }
@@ -562,6 +606,7 @@ export const renderShellPage = (data: ShellData): string => {
   <span id="status" class="pill review">in review</span>
   <span id="presence" class="presence off"><span class="dot"></span><span id="presence-label">checking&hellip;</span></span>
   <label>Version <select id="version"></select></label>
+  <label><input type="checkbox" id="ding"> ding when done</label>
   <span class="spacer"></span>
   <button id="general-btn">General</button>
   <button id="pin-mode">+ Comment</button>
