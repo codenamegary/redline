@@ -47,7 +47,7 @@ With **Notify** on, the server drops a one-line status into the OpenCode session
 
 ## ⚡ Quick start
 
-Every path ends at the same local daemon under `~/.redline`.
+Every path ends at the same local daemon under `~/.redline`. The installer prefers the **prebuilt release binary** (just curl + tar; no bun, node, or git needed). Run it from a source checkout and it uses your checkout instead — see [Development](#️-development).
 
 ### Claude Code, Cursor, Antigravity
 
@@ -83,10 +83,26 @@ Restart OpenCode sessions. First tool call starts the daemon.
 curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.sh | bash
 ```
 
+Pin a specific release with `REDLINE_VERSION=v0.2.0`. Prefer to build from source? Add `--from-source` (needs git + bun or node 22+).
+
 | Source | Keys |
 |--------|------|
-| Environment | `REDLINE_PORT`, `REDLINE_HOST`, `REDLINE_HOME` |
-| Defaults | `4739`, `127.0.0.1`, `~/.redline` |
+| Environment | `REDLINE_PORT`, `REDLINE_HOST`, `REDLINE_HOME`, `REDLINE_VERSION` |
+| Defaults | `4739`, `127.0.0.1`, `~/.redline`, latest release |
+
+## 🚢 Releases
+
+Versioning is driven by [Conventional Commits](https://www.conventionalcommits.org). `feat:` bumps the minor, `fix:` the patch, `feat!:` / `BREAKING CHANGE:` the major. [release-please](https://github.com/googleapis/release-please) watches `main`, opens a **Release PR** with the version bump and changelog, and merging it publishes a GitHub Release with prebuilt binaries attached:
+
+| Asset | Platform |
+|-------|----------|
+| `redline-<version>-linux-x64.tar.gz` | Linux x64 |
+| `redline-<version>-linux-arm64.tar.gz` | Linux arm64 |
+| `redline-<version>-darwin-x64.tar.gz` | macOS Intel |
+| `redline-<version>-darwin-arm64.tar.gz` | macOS Apple silicon |
+| `checksums.txt` | sha256 of all tarballs |
+
+Each tarball unpacks to a `redline-<version>-<platform>/` directory containing the self-contained `redline` binary (~80MB, bun-compiled — gzipped it's ~35MB) plus a `version.txt`. The installer grabs the right one automatically.
 
 ## 🎁 What you get
 
@@ -104,7 +120,8 @@ curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.s
 ~/.redline/
 ├── server.log                      # daemon output
 ├── settings.json                   # review agent, worker agent, notify (edit via /settings)
-├── app/                            # self-managed copy of redline (created by install.sh)
+├── bin/redline                     # prebuilt daemon binary (binary installs)
+├── app/                            # source checkout (only for pi/opencode wiring)
 └── artifacts/
     └── 2026-01-15-143205-dashboard/
         ├── meta.json               # title, prompt, status, version ledger
@@ -166,14 +183,16 @@ Threads are artifact-scoped even though they're stored per version. Open threads
 
 ```bash
 git clone https://github.com/codenamegary/redline.git && cd redline
-bash install.sh --with-pi --with-opencode   # optional harness wiring
+bash install.sh --from-source --with-pi --with-opencode   # optional harness wiring
 bun run check          # lint + typecheck + test
 bun run lint           # oxlint --deny-warnings
 bun run typecheck      # tsc --noEmit
 bun test               # bun test runner
 ```
 
-Node 22+ works too: `npx tsx src/main.ts serve` (the npm `bin` entry uses tsx). Runtime dependencies: fastify, zod, typebox.
+Running `install.sh` from a checkout automatically uses source mode, so the daemon runs your checkout. Node 22+ works too: `npx tsx src/main.ts serve` (the npm `bin` entry uses tsx). Runtime dependencies: fastify, zod, typebox.
+
+Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org) — squash-merge PRs with a conventional title (`feat: …`, `fix: …`) and release-please handles the rest.
 
 ## 🗺️ Roadmap
 
