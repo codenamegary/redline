@@ -16,7 +16,7 @@ Threads:
 
 export const DEFAULT_WORKER_PROMPT = `You are revising "{{title}}" to the next version.
 Work duty. Return a complete single-file HTML document.
-Keep stable ids. Inline CSS/JS. No external URLs.
+Keep stable ids. Inline CSS/JS except the Tailwind CDN script (https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4), which is the only external URL allowed.
 
 Write any note and in-document prose in plain language.
 Simple words. Short sentences. Facts only.

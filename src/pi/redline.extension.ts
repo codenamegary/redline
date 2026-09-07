@@ -253,7 +253,7 @@ const createParamsSchema = () =>
     note: Type.Optional(Type.String({ description: "Note recorded on the first version" })),
     html: Type.String({
       description:
-        "Complete self-contained HTML document: inline CSS and JS, inline SVG diagrams, no external requests",
+        "Complete HTML document. Tailwind CDN script allowed (https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4); all other CSS and JS inline, inline SVG diagrams, no other external requests",
     }),
   })
 
