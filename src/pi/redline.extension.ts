@@ -278,9 +278,14 @@ export default function (pi: ExtensionAPI): void {
           prompt: params.prompt ?? "",
           note: params.note,
           html: params.html,
-          // Origin capture for server-side notify pings. pi has no opencode
+          // Origin capture for server-side notify pings plus the
+          // working directory for worker repo context. pi has no opencode
           // server URL to offer, so only the session id travels.
-          origin: { host: "pi", sessionId: ctx.sessionManager.getSessionId() },
+          origin: {
+            host: "pi",
+            sessionId: ctx.sessionManager.getSessionId(),
+            cwd: ctx.cwd.length > 0 ? ctx.cwd : undefined,
+          },
         }),
       )
       const summary = SummarySchema.parse(body)

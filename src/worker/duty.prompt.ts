@@ -92,6 +92,19 @@ const workContract = [
   "No markdown fences. No prose before the document or after </html>.",
 ].join("\n")
 
+// Repo context is worker-only: the cwd comes from the artifact origin. The
+// contract is read-only — the duty's only output is the returned document,
+// never changes to the project itself.
+const repoContext = (input: DutyInput): string => {
+  if (input.cwd === undefined) return ""
+  return (
+    "\n\nRepo context:\n" +
+    "The project that produced this artifact lives at " + input.cwd + ".\n" +
+    "You may read project files there to ground your edits.\n" +
+    "Read-only: never modify, create, or delete files in the project."
+  )
+}
+
 export const buildWorkPrompt = (input: DutyInput): string =>
   renderTemplate(input.promptTemplate, {
     title: input.title,
@@ -99,7 +112,7 @@ export const buildWorkPrompt = (input: DutyInput): string =>
     brief: input.brief,
     threads: input.threads,
     batch: input.batchThreadIds ?? [],
-  }) + workContract
+  }) + repoContext(input) + workContract
 
 // First duty on a worker lane carries the document inline: spawned agents
 // get ACP permission requests auto-denied, so a "read the file on disk"

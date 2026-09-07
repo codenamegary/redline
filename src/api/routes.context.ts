@@ -382,6 +382,9 @@ const dispatchIteration = async (
       targets: [],
       batchThreadIds: batchThreadIds,
       htmlPath: htmlPath,
+      // Project directory captured at create time: the worker spawns there
+      // and reads the originating repo (read-only).
+      cwd: meta.origin?.cwd,
     },
     seed,
   )

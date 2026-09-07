@@ -200,6 +200,30 @@ describe("acp adapter", () => {
     await rejectsWith(adapter.runDuty(session, reviewerInput()), "acp session is gone")
   })
 
+  it("opens the session in the artifact's project cwd", async () => {
+    const workspace = makeWorkspace()
+    const cwdFile = join(workspace, "session-cwd.txt")
+    const { argv } = fixtureCommand(workspace, ["--cwd-file", cwdFile])
+    const adapter = makeAdapter({ worker: argv })
+    const session = await adapter.ensureSession("worker", "a1", undefined, "/repo/coffee-site")
+
+    await waitFor(() => existsSync(cwdFile))
+    expect(readFileSync(cwdFile, "utf8")).toBe("/repo/coffee-site")
+    await adapter.discard(session)
+  })
+
+  it("falls back to the daemon cwd when the duty carries none", async () => {
+    const workspace = makeWorkspace()
+    const cwdFile = join(workspace, "session-cwd.txt")
+    const { argv } = fixtureCommand(workspace, ["--cwd-file", cwdFile])
+    const adapter = makeAdapter({ reviewer: argv })
+    const session = await adapter.ensureSession("reviewer", "a1")
+
+    await waitFor(() => existsSync(cwdFile))
+    expect(readFileSync(cwdFile, "utf8")).toBe(process.cwd())
+    await adapter.discard(session)
+  })
+
   it("rejects ensureSession with detail when the command cannot spawn", async () => {
     const adapter = makeAdapter({ reviewer: ["redline-no-such-binary-acp-7q"] })
     await rejectsWith(

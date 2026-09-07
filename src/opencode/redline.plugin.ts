@@ -283,10 +283,15 @@ export const RedlinePlugin: Plugin = async () => {
               prompt: params.prompt ?? "",
               note: params.note,
               html: params.html,
-              // Origin capture for server-side notify pings. The tool
+              // Origin capture for server-side notify pings plus the
+              // project directory for worker repo context. The tool
               // context has no opencode server URL, so only the session id
               // travels; the redline server resolves the URL itself.
-              origin: { host: "opencode", sessionId: ctx.sessionID },
+              origin: {
+                host: "opencode",
+                sessionId: ctx.sessionID,
+                cwd: ctx.directory.length > 0 ? ctx.directory : undefined,
+              },
             }),
           )
           const summary = SummarySchema.parse(body)
