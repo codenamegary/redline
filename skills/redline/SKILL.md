@@ -60,13 +60,13 @@ pi and OpenCode tools start the daemon on first call. Without those tools (Claud
 
    If you are inside a full checkout (it contains `install.sh` and `src/main.ts`), you may use that directory instead and set `REDLINE_APP` to it.
 
-2. Ensure deps and a running daemon (idempotent, safe to re-run). Also pulls the latest app when `~/.redline/app` is a git checkout:
+2. Ensure a running daemon (idempotent, safe to re-run). Also updates to the latest release when one exists:
 
    ```bash
    bash ~/.redline/app/install.sh --ensure-daemon
    ```
 
-   Provisions a runtime if needed (bun, or a user-local bun when only node < 22 exists), installs dependencies, starts or restarts the daemon after an update, waits for health. Logs: `~/.redline/server.log`.
+   Downloads the prebuilt release binary into `~/.redline/bin` when needed (only curl + tar required — no bun, node, or deps), starts or restarts the daemon after an update, and waits for health. Logs: `~/.redline/server.log`. `--from-source` runs the daemon from the checkout instead (needs bun or node 22+).
 
 Skill text updates come from the skills CLI (`npx skills update`). Do not ask the user to run update commands.
 
