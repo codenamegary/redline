@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test"
+import { Buffer } from "node:buffer"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -195,6 +196,116 @@ describe("artifact api", () => {
     // the store-level guard would answer 404. Either way the file is not served.
     expect([400, 404]).toContain(response.statusCode)
     expect(response.body).not.toContain("meta")
+  })
+
+  it("uploads version assets and serves them on the version path", async () => {
+    const created = await createArtifact("Asset test", "<img src=\"hero.png\">")
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a])
+    const data = Buffer.from(bytes).toString("base64")
+
+    const upload = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/assets",
+      payload: { version: "v1", filename: "hero.png", data },
+    })
+    expect(upload.statusCode).toBe(201)
+    const asset = z
+      .object({
+        artifactId: z.string(),
+        version: z.string(),
+        filename: z.string(),
+        size: z.number(),
+        url: z.string(),
+      })
+      .parse(upload.json())
+    expect(asset).toMatchObject({ artifactId: created.id, version: "v1", filename: "hero.png", size: bytes.byteLength })
+    expect(asset.url).toContain("/a/" + created.id + "/v1/hero.png")
+    expect(upload.headers.location).toBe(asset.url)
+
+    const served = await app.inject({ method: "GET", url: "/a/" + created.id + "/v1/hero.png" })
+    expect(served.statusCode).toBe(200)
+    expect(served.headers["content-type"]).toContain("image/png")
+    // LightMyRequest exposes the untouched bytes on rawPayload.
+    expect(Array.from(served.rawPayload as unknown as Uint8Array)).toEqual(Array.from(bytes))
+
+    const viaCurrent = await app.inject({ method: "GET", url: "/a/" + created.id + "/current/hero.png" })
+    expect(viaCurrent.statusCode).toBe(200)
+
+    // The version ledger records the asset, and the html path keeps working.
+    const detail = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id })
+    const detailBody = z
+      .object({ versions: z.array(z.object({ version: z.string(), assets: z.array(z.string()).optional() })) })
+      .parse(detail.json())
+    expect(detailBody.versions[0]?.assets).toEqual(["hero.png"])
+
+    const missing = await app.inject({ method: "GET", url: "/a/" + created.id + "/v1/nope.txt" })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.headers["content-type"]).toContain("application/problem+json")
+  })
+
+  it("rejects bad asset uploads with the right problem details", async () => {
+    const created = await createArtifact("Asset rejects", "<p>x</p>")
+    const url = "/api/v1/artifacts/" + created.id + "/assets"
+    const data = Buffer.from("png").toString("base64")
+
+    const badName = await app.inject({ method: "POST", url, payload: { version: "v1", filename: "../evil.png", data } })
+    expect(badName.statusCode).toBe(422)
+    expect(badName.headers["content-type"]).toContain("application/problem+json")
+
+    const badExt = await app.inject({ method: "POST", url, payload: { version: "v1", filename: "virus.exe", data } })
+    expect(badExt.statusCode).toBe(422)
+
+    const notBase64 = await app.inject({
+      method: "POST",
+      url,
+      payload: { version: "v1", filename: "hero.png", data: "not base64!!!" },
+    })
+    expect(notBase64.statusCode).toBe(400)
+
+    const badVersion = await app.inject({ method: "POST", url, payload: { version: "v9", filename: "hero.png", data } })
+    expect(badVersion.statusCode).toBe(404)
+
+    const badArtifact = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/2099-01-01-000000-nope/assets",
+      payload: { version: "v1", filename: "hero.png", data },
+    })
+    expect(badArtifact.statusCode).toBe(404)
+
+    const first = await app.inject({ method: "POST", url, payload: { version: "v1", filename: "hero.png", data } })
+    expect(first.statusCode).toBe(201)
+    const duplicate = await app.inject({ method: "POST", url, payload: { version: "v1", filename: "hero.png", data } })
+    expect(duplicate.statusCode).toBe(409)
+  })
+
+  it("accepts asset uploads for a pending version before publish", async () => {
+    const created = await createArtifact("Pending assets", "<p>v1</p>")
+    await createThread(created.id, "add an image in v2")
+    const iterated = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(iterated.statusCode).toBe(201)
+
+    const data = Buffer.from("gif-bytes").toString("base64")
+    const upload = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/assets",
+      payload: { version: "v2", filename: "chart.gif", data },
+    })
+    expect(upload.statusCode).toBe(201)
+
+    const published = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/versions",
+      payload: { html: "<img src=\"chart.gif\">", note: "with image" },
+    })
+    expect(published.statusCode).toBe(201)
+    const served = await app.inject({ method: "GET", url: "/a/" + created.id + "/v2/chart.gif" })
+    expect(served.statusCode).toBe(200)
+    expect(served.headers["content-type"]).toContain("image/gif")
+    expect(served.body).toContain("gif-bytes")
   })
 
   it("returns problem details for unknown artifacts", async () => {

@@ -7,15 +7,19 @@ import {
   approveVersion,
   appendThread,
   appendThreadMessage,
+  assetFilename,
   countOpenThreads,
   createArtifact,
   listArtifacts,
+  listVersionAssets,
+  maxAssetBytes,
   openStore,
   publishIteration,
   readArtifactMeta,
   readFeedbackDoc,
   readFeedbackView,
   replaceThinkingMessage,
+  saveVersionAsset,
   setThreadStatus,
   startIteration,
   Store,
@@ -371,6 +375,71 @@ describe("artifact store", () => {
       author: "user",
     })
     expect(bad).rejects.toMatchObject({ kind: "not-found" })
+  })
+
+  it("saves version assets, lists them, and records them on the version row", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Assets", prompt: "", html: "<img src=\"hero.png\">" })
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    const first = await saveVersionAsset(store, meta.id, "v1", "hero.png", bytes)
+    expect(first.filename).toBe("hero.png")
+    expect(first.assets).toEqual(["hero.png"])
+
+    const second = await saveVersionAsset(store, meta.id, "v1", "banner.webp", new Uint8Array([1]))
+    // Sorted, not insertion order: the list is deterministic for meta and UI.
+    expect(second.assets).toEqual(["banner.webp", "hero.png"])
+    expect(await listVersionAssets(store, meta.id, "v1")).toEqual(["banner.webp", "hero.png"])
+    expect(await listVersionAssets(store, meta.id, "v9")).toEqual([])
+
+    const onDisk = readFileSync(join(store.artifactsDir, meta.id, "v1-assets", "hero.png"))
+    expect(Array.from(onDisk)).toEqual([0x89, 0x50, 0x4e, 0x47])
+
+    const fresh = await readArtifactMeta(store, meta.id)
+    expect(fresh.versions[0]?.assets).toEqual(["banner.webp", "hero.png"])
+  })
+
+  it("rejects invalid asset filenames, unknown versions, duplicates, and oversize bytes", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Asset guards", prompt: "", html: "<p>x</p>" })
+    const bytes = new Uint8Array([1])
+
+    expect(saveVersionAsset(store, meta.id, "v1", "../evil.png", bytes)).rejects.toMatchObject({
+      kind: "unprocessable",
+    })
+    expect(saveVersionAsset(store, meta.id, "v1", "sub/dir.png", bytes)).rejects.toMatchObject({
+      kind: "unprocessable",
+    })
+    expect(saveVersionAsset(store, meta.id, "v1", "noext", bytes)).rejects.toMatchObject({
+      kind: "unprocessable",
+    })
+    expect(saveVersionAsset(store, meta.id, "v1", "virus.exe", bytes)).rejects.toMatchObject({
+      kind: "unprocessable",
+    })
+    expect(saveVersionAsset(store, meta.id, "v9", "hero.png", bytes)).rejects.toMatchObject({
+      kind: "not-found",
+    })
+    expect(
+      saveVersionAsset(store, "2099-01-01-000000-nope", "v1", "hero.png", bytes),
+    ).rejects.toMatchObject({ kind: "not-found" })
+
+    await saveVersionAsset(store, meta.id, "v1", "hero.png", bytes)
+    expect(saveVersionAsset(store, meta.id, "v1", "hero.png", bytes)).rejects.toMatchObject({
+      kind: "conflict",
+    })
+    expect(
+      saveVersionAsset(store, meta.id, "v1", "big.png", new Uint8Array(maxAssetBytes + 1)),
+    ).rejects.toMatchObject({ kind: "unprocessable" })
+    expect(saveVersionAsset(store, meta.id, "v1", "empty.png", new Uint8Array(0))).rejects.toMatchObject({
+      kind: "unprocessable",
+    })
+  })
+
+  it("validates asset names the same way serving does", () => {
+    expect(assetFilename("hero.png")).toBe("hero.png")
+    expect(assetFilename("HERO-2.webp")).toBe("HERO-2.webp")
+    expect(() => assetFilename("../meta.json")).toThrow()
+    expect(() => assetFilename("a/b.png")).toThrow()
+    expect(() => assetFilename(".hidden.png")).toThrow()
   })
 })
 

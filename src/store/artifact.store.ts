@@ -59,6 +59,78 @@ export const artifactMetaPath = (store: Store, id: string): string =>
 export const artifactVersionFile = (store: Store, id: string, version: string): string =>
   join(artifactDir(store, id), version + "-index.html")
 
+// Per-version static assets (generated images and the like) live in a
+// sibling directory next to the flat version file: <id>/v<N>-assets/<name>.
+export const artifactVersionAssetsDir = (store: Store, id: string, version: string): string =>
+  join(artifactDir(store, id), version + "-assets")
+
+export const artifactVersionAssetFile = (store: Store, id: string, version: string, filename: string): string =>
+  join(artifactVersionAssetsDir(store, id, version), filename)
+
+export const assetExtensions = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif"] as const
+
+// Single path segment, no separators, no leading dot: the pattern alone
+// kills traversal, spaces, and hidden files. Reused by the static handler,
+// so serving and saving share one definition of a legal asset name.
+const assetNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/
+
+export const maxAssetBytes = 5_000_000
+
+export const isValidAssetName = (filename: string): boolean => {
+  const dot = filename.lastIndexOf(".")
+  const ext = dot === -1 ? "" : filename.slice(dot).toLowerCase()
+  return assetNamePattern.test(filename) && (assetExtensions as readonly string[]).includes(ext)
+}
+
+// Validate a requested asset filename or throw not-found. The static
+// handler routes /a/:id/:version/<name> through here, so a bad name can
+// never resolve to a file outside the version assets dir.
+export const assetFilename = (filename: string): string => {
+  if (!isValidAssetName(filename)) throw storeError("not-found", "asset not found")
+  return filename
+}
+
+export const saveVersionAsset = async (
+  store: Store,
+  id: string,
+  version: string,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<{ filename: string; assets: string[] }> =>
+  withFileLock(artifactMetaPath(store, id), async () => {
+    if (!isValidAssetName(filename)) {
+      throw storeError("unprocessable", "invalid asset filename: letters, digits, dot, dash, underscore, known image extension")
+    }
+    const name = filename
+    if (bytes.byteLength === 0) throw storeError("unprocessable", "asset is empty")
+    if (bytes.byteLength > maxAssetBytes) {
+      throw storeError("unprocessable", "asset exceeds " + String(maxAssetBytes) + " bytes")
+    }
+    const meta = await readArtifactMeta(store, id)
+    const row = meta.versions.find((entry) => entry.version === version)
+    if (row === undefined) throw storeError("not-found", "version not found: " + version)
+    const assetsDir = artifactVersionAssetsDir(store, id, version)
+    const target = join(assetsDir, name)
+    if (existsSync(target)) {
+      throw storeError("conflict", "asset already exists: " + name + " (pick a new filename)")
+    }
+    await mkdir(assetsDir, { recursive: true })
+    await writeFile(target, bytes)
+    const assets = [...(row.assets ?? []), name].sort((a, b) => a.localeCompare(b))
+    await writeArtifactMeta(store, id, {
+      ...meta,
+      updatedAt: new Date().toISOString(),
+      versions: meta.versions.map((entry) => (entry.version === version ? { ...entry, assets } : entry)),
+    })
+    return { filename: name, assets }
+  })
+
+export const listVersionAssets = async (store: Store, id: string, version: string): Promise<string[]> => {
+  const dir = artifactVersionAssetsDir(store, id, version)
+  const entries = await readdir(dir).catch(() => [])
+  return entries.sort((a, b) => a.localeCompare(b))
+}
+
 const feedbackDocPath = (store: Store, id: string, version: string): string =>
   join(artifactDir(store, id), version + "-feedback.json")
 

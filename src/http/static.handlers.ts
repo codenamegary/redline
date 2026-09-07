@@ -5,7 +5,13 @@ import { FastifyInstance } from "fastify"
 import { z } from "zod"
 
 import { ArtifactIdSchema, VersionSchema } from "../store/artifact.models"
-import { artifactVersionFile, readArtifactMeta, Store } from "../store/artifact.store"
+import {
+  artifactVersionAssetFile,
+  artifactVersionFile,
+  assetFilename,
+  readArtifactMeta,
+  Store,
+} from "../store/artifact.store"
 import { storeError } from "../store/errors"
 
 const contentTypes: Record<string, string> = {
@@ -50,12 +56,21 @@ export const registerArtifactFiles = (app: FastifyInstance, store: Store): void 
     const params = StaticParamsSchema.parse(request.params)
     const meta = await readArtifactMeta(store, params.id)
     const version = params.version === "current" ? meta.current : params.version
-    const target = artifactVersionFile(store, params.id, version)
+    // Empty or index.html is the version document; anything else is a
+    // static asset under <version>-assets/. assetFilename rejects anything
+    // that is not a single safe path segment with a known extension, so a
+    // crafted wildcard can never resolve outside the artifact dir.
+    const requested = params["*"]
+    const assetName = requested === "" || requested === "index.html" ? undefined : assetFilename(requested)
+    const target =
+      assetName === undefined
+        ? artifactVersionFile(store, params.id, version)
+        : artifactVersionAssetFile(store, params.id, version, assetName)
     const statResult = await stat(target).catch(() => undefined)
     if (statResult?.isFile()) {
       reply.header("cache-control", "no-store").type(contentTypeForPath(target))
       return reply.send(createReadStream(target))
     }
-    throw storeError("not-found", "file not found: " + params["*"])
+    throw storeError("not-found", "file not found")
   })
 }

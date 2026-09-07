@@ -12,6 +12,7 @@ import { getWorkerRoute } from "./artifacts/worker/get"
 import { createIterationRoute } from "./artifacts/iterations/create"
 import { createVersionRoute } from "./artifacts/versions/create"
 import { approveVersionRoute } from "./artifacts/versions/approve"
+import { createAssetRoute } from "./artifacts/assets/create"
 import { getFeedbackRoute } from "./artifacts/feedback/get"
 import { createFeedbackRoute } from "./artifacts/feedback/create"
 import { patchThreadRoute } from "./artifacts/threads/patch"
@@ -38,6 +39,7 @@ const artifactRoutes = (ctx: RoutesContext): RouteDescriptor[] => [
   createIterationRoute(ctx),
   createVersionRoute(ctx),
   approveVersionRoute(ctx),
+  createAssetRoute(ctx),
   getFeedbackRoute(ctx),
   createFeedbackRoute(ctx),
   patchThreadRoute(ctx),
