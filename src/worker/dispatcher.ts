@@ -132,11 +132,12 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
     lane: Lane,
     adapter: HostAdapter,
     seed?: SeedSpec,
+    cwd?: string,
   ): Promise<AgentSession> => {
     const cached = cachedSession(artifactId, lane)
     if (seed === undefined && cached !== undefined && cached.adapter === adapter) return cached.session
     if (cached !== undefined) discardSession(artifactId, lane)
-    const session = await adapter.ensureSession(lane, artifactId, seed)
+    const session = await adapter.ensureSession(lane, artifactId, seed, cwd)
     cacheSession(artifactId, lane, { adapter, session })
     return session
   }
@@ -199,7 +200,7 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
         await fail(artifactId, "worker", "worker adapter is not configured")
         return
       }
-      const session = await ensureSession(artifactId, "worker", adapter, seed)
+      const session = await ensureSession(artifactId, "worker", adapter, seed, input.cwd)
       const result = await adapter.runDuty(session, input)
       if (result.kind !== "document") {
         await fail(artifactId, "worker", "work duty returned replies")

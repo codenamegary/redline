@@ -65,7 +65,7 @@ const makeDispatcher = (home: string, adapters: DispatcherAdapters) => {
 // Fake adapter with manual counters and a deferred gate the test controls.
 type FakeAdapter = {
   adapter: HostAdapter
-  ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec }[]
+  ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec; cwd?: string }[]
   dutyCalls: { session: AgentSession; input: DutyInput }[]
   discards: AgentSession[]
   notifyCalls: { origin: OriginRef; text: string }[]
@@ -76,7 +76,7 @@ type FakeAdapter = {
 }
 
 const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
-  const ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec }[] = []
+  const ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec; cwd?: string }[] = []
   const dutyCalls: { session: AgentSession; input: DutyInput }[] = []
   const discards: AgentSession[] = []
   const notifyCalls: { origin: OriginRef; text: string }[] = []
@@ -88,8 +88,8 @@ const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
   const adapter: HostAdapter = {
     id,
     canNotifyOrigin: () => true,
-    ensureSession: async (lane, artifactId, seed) => {
-      ensureCalls.push({ lane, artifactId, seed })
+    ensureSession: async (lane, artifactId, seed, cwd) => {
+      ensureCalls.push({ lane, artifactId, seed, cwd })
       return {
         artifactId,
         lane,
@@ -203,7 +203,11 @@ describe("dispatcher", () => {
     const seed: SeedSpec = { html: "<p>v1</p>", version: "v1" }
     fake.hold()
     expect(
-      dispatcher.enqueueWork("a1", dutyInput({ lane: "worker", batchThreadIds: ["t1"] }), seed),
+      dispatcher.enqueueWork(
+        "a1",
+        dutyInput({ lane: "worker", batchThreadIds: ["t1"], cwd: "/repo/coffee-site" }),
+        seed,
+      ),
     ).toBe(true)
     await waitFor(() => fake.dutyCalls.length === 1)
     // Worker duties do not queue: one at a time per artifact.
@@ -212,7 +216,11 @@ describe("dispatcher", () => {
     fake.results.push({ kind: "document", html: "<p>v2</p>", note: "footer added" })
     fake.release()
     await waitFor(() => events.length === 1)
-    expect(fake.ensureCalls).toEqual([{ lane: "worker", artifactId: "a1", seed }])
+    // The duty's cwd rides to the adapter so the worker session spawns in
+    // the originating repo.
+    expect(fake.ensureCalls).toEqual([
+      { lane: "worker", artifactId: "a1", seed, cwd: "/repo/coffee-site" },
+    ])
     expect(events).toEqual([
       {
         kind: "document",

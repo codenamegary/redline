@@ -4,7 +4,7 @@ export type Lane = "reviewer" | "worker"
 
 export type AdapterId = "acp" | "opencode-sdk" | "none"
 
-export type OriginRef = { host: string; sessionId: string; serverUrl?: string }
+export type OriginRef = { host: string; sessionId: string; serverUrl?: string; cwd?: string }
 
 export type AgentSession = { artifactId: string; lane: Lane; hostSessionId: string }
 
@@ -26,6 +26,9 @@ export type DutyInput = {
   batchThreadIds?: string[]
   // Absolute path to the current index.html on disk (worker lane seed hint).
   htmlPath?: string
+  // Project directory from the artifact origin (worker lane). Worker
+  // sessions spawn there so the duty can read the originating repo.
+  cwd?: string
 }
 
 export type DutyResult =
@@ -35,7 +38,7 @@ export type DutyResult =
 export type HostAdapter = {
   readonly id: AdapterId
   canNotifyOrigin(): boolean
-  ensureSession(lane: Lane, artifactId: string, seed?: SeedSpec): Promise<AgentSession>
+  ensureSession(lane: Lane, artifactId: string, seed?: SeedSpec, cwd?: string): Promise<AgentSession>
   runDuty(session: AgentSession, input: DutyInput): Promise<DutyResult>
   discard?(session: AgentSession): Promise<void>
   notifyOrigin?(origin: OriginRef, text: string): Promise<void>

@@ -9,7 +9,7 @@ import { DutyInput, SeedSpec } from "./host.adapter"
 import { createOpenCodeSdkAdapter } from "./opencode.sdk.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "./prompts"
 
-type RecordedRequest = { method: string; path: string; body: unknown }
+type RecordedRequest = { method: string; path: string; query: string; body: unknown }
 
 type Reply = { status: number; body?: unknown }
 
@@ -72,7 +72,12 @@ const makeServer = (): TestServer => {
           body = raw
         }
       }
-      const recorded: RecordedRequest = { method: request.method, path: url.pathname, body: body }
+      const recorded: RecordedRequest = {
+        method: request.method,
+        path: url.pathname,
+        query: url.search,
+        body: body,
+      }
       requests.push(recorded)
       const outcome = reply(recorded)
       return outcome.body === undefined
@@ -198,6 +203,7 @@ describe("opencode sdk adapter", () => {
     expect(recorded(server.requests, 0)).toEqual({
       method: "POST",
       path: "/session",
+      query: "",
       body: { title: "redline a1 worker" },
     })
     const prompt = promptOf(recorded(messageRequests(server.requests), 0))
@@ -250,6 +256,18 @@ describe("opencode sdk adapter", () => {
     expect(result).toEqual({
       kind: "replies",
       items: [{ threadId: "t1", messageId: "m2", body: "Looks fine, fixed." }],
+    })
+  })
+
+  it("passes the project cwd as the directory query param on /session", async () => {
+    const server = makeServer()
+    const adapter = makeAdapter(server.url)
+    await adapter.ensureSession("worker", "a10", seed(), "/home/dev/coffee site")
+    expect(recorded(server.requests, 0)).toEqual({
+      method: "POST",
+      path: "/session",
+      query: "?directory=%2Fhome%2Fdev%2Fcoffee%20site",
+      body: { title: "redline a10 worker" },
     })
   })
 

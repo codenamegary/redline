@@ -783,7 +783,7 @@ describe("agent lane dispatch", () => {
         title: "Lane create",
         html: "<p>lane-a</p>",
         prompt: "make it pop",
-        origin: { host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096" },
+        origin: { host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096", cwd: "/repo/coffee-site" },
       },
     })
     expect(response.statusCode).toBe(201)
@@ -792,7 +792,12 @@ describe("agent lane dispatch", () => {
     expect(summary.worker).toBe("idle")
 
     const meta = await readArtifactMeta(laneStore, summary.id)
-    expect(meta.origin).toEqual({ host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096" })
+    expect(meta.origin).toEqual({
+      host: "pi",
+      sessionId: "sess-1",
+      serverUrl: "http://127.0.0.1:4096",
+      cwd: "/repo/coffee-site",
+    })
 
     await waitForBound(summary.id)
     const settled = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + summary.id })

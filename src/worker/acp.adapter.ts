@@ -252,7 +252,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     state.connection.kill()
   }
 
-  const handshake = async (connection: Connection): Promise<string> => {
+  const handshake = async (connection: Connection, cwd?: string): Promise<string> => {
     const initResult = await withTimeout(
       connection.request("initialize", {
         protocolVersion: acpProtocolVersion,
@@ -267,8 +267,9 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     if (version !== acpProtocolVersion) {
       throw new Error("acp agent speaks unsupported protocol version " + String(version))
     }
+    // The artifact's project cwd when known, else wherever the daemon runs.
     const newResult = await withTimeout(
-      connection.request("session/new", { cwd: process.cwd(), mcpServers: [] }),
+      connection.request("session/new", { cwd: cwd ?? process.cwd(), mcpServers: [] }),
       handshakeTimeoutMs,
       "acp agent did not answer session/new within " + String(handshakeTimeoutSeconds) + "s",
       connection.kill,
@@ -293,6 +294,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     lane: Lane,
     artifactId: string,
     seed?: SeedSpec,
+    cwd?: string,
   ): Promise<AgentSession> => {
     const config = await options.getLaneConfig(lane)
     const argv = config.acpCommand
@@ -301,7 +303,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     sessionCounter += 1
     const hostSessionId = "acp-" + artifactId + "-" + String(sessionCounter)
     try {
-      const sessionId = await handshake(connection)
+      const sessionId = await handshake(connection, cwd)
       sessions.set(hostSessionId, { connection, sessionId, lane, artifactId, seed, seeded: false })
     } catch (error) {
       connection.kill()

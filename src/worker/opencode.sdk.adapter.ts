@@ -67,10 +67,14 @@ export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): Ho
     lane: Lane,
     artifactId: string,
     seed?: SeedSpec,
+    cwd?: string,
   ): Promise<AgentSession> => {
     const serverUrl = await options.getServerUrl()
+    // opencode takes the project directory as a query param on /session;
+    // sessions spawn there, so duties run inside the originating repo.
+    const directory = cwd === undefined ? "" : "?directory=" + encodeURIComponent(cwd)
     const body = await requestJson(
-      serverUrl + "/session",
+      serverUrl + "/session" + directory,
       messageInit({ title: "redline " + artifactId + " " + lane }),
     )
     const sessionId = isRecord(body) && typeof body.id === "string" ? body.id : undefined

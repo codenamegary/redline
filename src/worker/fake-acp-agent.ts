@@ -1,6 +1,6 @@
 // Fixture ACP agent for tests: speaks just enough JSON-RPC over stdio to
 // initialize, open a session, and stream one prompt turn. Not shipped.
-// Usage: bun fake-acp-agent.ts [--pid-file <path>] [--silent-init] [--silent-prompt]
+// Usage: bun fake-acp-agent.ts [--pid-file <path>] [--cwd-file <path>] [--silent-init] [--silent-prompt]
 
 type UnknownRecord = Record<string, unknown>
 
@@ -13,6 +13,7 @@ const flagValue = (name: string): string | undefined => {
   return index >= 0 ? args[index + 1] : undefined
 }
 const pidFile = flagValue("--pid-file")
+const cwdFile = flagValue("--cwd-file")
 const silentInit = args.includes("--silent-init")
 const silentPrompt = args.includes("--silent-prompt")
 
@@ -39,7 +40,7 @@ const noteFor = (prompt: string): string => {
   return "fake iteration note"
 }
 
-const handle = (line: string): void => {
+const handle = async (line: string): Promise<void> => {
   let message: unknown
   try {
     message = JSON.parse(line)
@@ -64,6 +65,10 @@ const handle = (line: string): void => {
     return
   }
   if (method === "session/new" && id !== undefined) {
+    const params = isRecord(message.params) ? message.params : {}
+    if (cwdFile !== undefined && typeof params.cwd === "string") {
+      await Bun.write(cwdFile, params.cwd)
+    }
     send({ jsonrpc: "2.0", id, result: { sessionId: "sess-fake-" + String(id) } })
     return
   }
@@ -107,7 +112,7 @@ for await (const chunk of process.stdin) {
     if (index < 0) break
     const line = buffer.slice(0, index).trim()
     buffer = buffer.slice(index + 1)
-    if (line.length > 0) handle(line)
+    if (line.length > 0) await handle(line)
   }
 }
 

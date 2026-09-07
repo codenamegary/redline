@@ -125,6 +125,21 @@ describe("buildWorkPrompt", () => {
     expect(prompt).toContain("<!-- redline-note: <one-sentence what changed> -->")
     expect(prompt).toContain("No markdown fences.")
   })
+
+  it("appends read-only repo context when the duty carries a cwd", () => {
+    const prompt = buildWorkPrompt(workerInput({ cwd: "/repo/coffee-site" }))
+    expect(prompt).toContain("Repo context:")
+    expect(prompt).toContain("lives at /repo/coffee-site")
+    expect(prompt).toContain("You may read project files there")
+    expect(prompt).toContain("Read-only: never modify, create, or delete files in the project.")
+    // Repo context precedes the output contract.
+    expect(prompt.indexOf("Repo context:")).toBeLessThan(prompt.indexOf("Output contract"))
+  })
+
+  it("omits repo context without a cwd and never on reviewer lanes", () => {
+    expect(buildWorkPrompt(workerInput())).not.toContain("Repo context:")
+    expect(buildReplyPrompt(reviewerInput({ cwd: "/repo/coffee-site" }))).not.toContain("Repo context:")
+  })
 })
 
 describe("buildLanePrompt", () => {
