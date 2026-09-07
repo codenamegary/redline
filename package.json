@@ -1,6 +1,6 @@
 {
   "name": "redline",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local review server for AI-generated design artifacts. The agent renders, the human redlines.",
   "type": "module",
   "license": "MIT",
