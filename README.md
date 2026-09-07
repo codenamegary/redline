@@ -16,7 +16,7 @@ Google Docs comments. Figma pins. Except the document is written by your agent, 
 
 ## 😍 Look at it go
 
-<video src="docs/redline-demo.mp4" controls muted playsinline preload="metadata" width="100%"></video>
+<video src="https://raw.githubusercontent.com/codenamegary/redline/main/docs/redline-demo.mp4" controls muted playsinline preload="metadata" width="100%"></video>
 
 *Rendered with [Remotion](demo/remotion)*
 
