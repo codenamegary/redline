@@ -1,0 +1,27 @@
+{
+  "name": "redline-demo-video",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "scripts": {
+    "prepare-assets": "bun run scripts/assets.prepare.ts",
+    "studio": "remotion studio",
+    "render": "remotion render RedlineDemo out/redline-demo.mp4",
+    "render:docs": "remotion render RedlineDemo ../../docs/redline-demo.mp4",
+    "still": "remotion still RedlineDemo out/preview.png",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.521",
+    "@remotion/transitions": "^4.0.521",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "^4.0.521",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "@types/react": "^19.2.18"
+  }
+}

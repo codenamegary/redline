@@ -16,21 +16,9 @@ Google Docs comments. Figma pins. Except the document is written by your agent, 
 
 ## 😍 Look at it go
 
-The review shell. Your artifact on the left, pinned threads on the right, numbered pins exactly where you clicked:
+<video src="docs/redline-demo.mp4" controls muted playsinline preload="metadata" width="100%"></video>
 
-![Reviewing a UI mockup with pinned comments](docs/screenshots/review-dashboard.png)
-
-Redlining an architecture proposal while the agent answers questions *inside the thread* (note `resolved in v2`. Threads survive revisions because they should):
-
-![Reviewing an architecture doc across versions](docs/screenshots/review-architecture.png)
-
-Yes, you can review *plans and ideas* too. This is a real concept brief for a $14,000 robot barista, receiving the scrutiny it deserves:
-
-![Reviewing a concept brief for a robot barista](docs/screenshots/review-robot.png)
-
-And a gallery of everything awaiting your judgment:
-
-![The artifact gallery](docs/screenshots/gallery.png)
+*Rendered with [Remotion](demo/remotion)*
 
 ## 🔁 The loop
 
