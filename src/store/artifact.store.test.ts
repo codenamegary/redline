@@ -210,6 +210,7 @@ describe("artifact store", () => {
   it("lists artifacts newest first and skips junk directories", async () => {
     const store = makeStore()
     const first = await createArtifact(store, { title: "First", prompt: "", html: "<p>1</p>" })
+    await new Promise((resolve) => setTimeout(resolve, 10))
     const second = await createArtifact(store, { title: "Second", prompt: "", html: "<p>2</p>" })
     const junkDir = join(store.artifactsDir, "junk-partial-write")
     mkdirSync(junkDir, { recursive: true })
