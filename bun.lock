@@ -7,7 +7,7 @@
     },
     "packages/contracts/http": {
       "name": "@redline/http-contracts",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "dependencies": {
         "zod": "^4.5.4",
       },
@@ -20,7 +20,7 @@
     },
     "packages/server": {
       "name": "redline",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "bin": {
         "redline": "./bin/redline.js",
       },
@@ -42,7 +42,7 @@
     },
     "packages/ui": {
       "name": "@redline/ui",
-      "version": "0.4.1",
+      "version": "0.5.0",
       "dependencies": {
         "@redline/http-contracts": "workspace:*",
         "@tailwindcss/vite": "^4.3.3",
