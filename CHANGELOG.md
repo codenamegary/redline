@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/codenamegary/redline/compare/v0.3.0...v0.4.0) (2026-09-08)
+
+
+### Features
+
+* **summary:** surface version asset counts on gallery cards and summaries ([#22](https://github.com/codenamegary/redline/issues/22)) ([826ef32](https://github.com/codenamegary/redline/commit/826ef32f6c47dbabd27f720966d533e0af22c664))
+
 ## [0.3.0](https://github.com/codenamegary/redline/compare/v0.2.0...v0.3.0) (2026-09-07)
 
 
