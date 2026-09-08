@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { AcpAdapter, createAcpAdapter } from "./acp.adapter"
+import { AcpAdapter, createAcpAdapter, defaultTimeoutSeconds } from "./acp.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "./prompts"
 import { Thread } from "../store/artifact.models"
 import { LaneConfig } from "../store/settings.models"
@@ -128,6 +128,12 @@ const workerInput = (overrides?: Partial<DutyInput>): DutyInput => ({
 })
 
 describe("acp adapter", () => {
+  it("defaults the duty timeout to 15 minutes", () => {
+    // Workers can legitimately run for many minutes on a big iteration;
+    // the old 300s default kept failing long duties (#23).
+    expect(defaultTimeoutSeconds).toBe(900)
+  })
+
   it("runs a reviewer duty end to end against the fixture agent", async () => {
     const workspace = makeWorkspace()
     const { argv } = fixtureCommand(workspace)
