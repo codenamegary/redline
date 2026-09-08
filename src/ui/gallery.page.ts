@@ -7,6 +7,7 @@ export type GalleryItem = {
   current: string
   versionCount: number
   openThreads: number
+  assetsCount: number
   createdAt: string
   updatedAt: string
   reviewUrl: string
@@ -35,7 +36,11 @@ const renderCard = (item: GalleryItem): string => {
     '<span class="' + pillClass(status) + '">' + pillLabel(status) + "</span>" +
     "</div>" +
     '<div class="card-meta">' + id + " &middot; " + current + " &middot; " +
-    item.versionCount + (item.versionCount === 1 ? " version" : " versions") + " &middot; " +
+    item.versionCount + (item.versionCount === 1 ? " version" : " versions") +
+    (item.assetsCount > 0
+      ? " &middot; " + item.assetsCount + (item.assetsCount === 1 ? " image" : " images")
+      : "") +
+    " &middot; " +
     '<span class="' + (item.openThreads > 0 ? "open-count" : "") + '">' +
     item.openThreads + (item.openThreads === 1 ? " open thread" : " open threads") + "</span>" +
     " &middot; updated " + shortDate(item.updatedAt) + "</div>" +
