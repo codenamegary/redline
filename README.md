@@ -102,7 +102,7 @@ Versioning is driven by [Conventional Commits](https://www.conventionalcommits.o
 | `redline-<version>-darwin-arm64.tar.gz` | macOS Apple silicon |
 | `checksums.txt` | sha256 of all tarballs |
 
-Each tarball unpacks to a `redline-<version>-<platform>/` directory containing the self-contained `redline` binary (~80MB, bun-compiled — gzipped it's ~35MB) plus a `version.txt`. The installer grabs the right one automatically.
+Each tarball unpacks to a `redline-<version>-<platform>/` directory containing the self-contained `redline` binary (~80MB, bun-compiled — gzipped it's ~35MB), the built React app in `web/` (served at `/`), and a `version.txt`. The installer grabs the right one automatically.
 
 ## 🎁 What you get
 
@@ -182,16 +182,25 @@ Threads are artifact-scoped even though they're stored per version. Open threads
 
 ## 🛠️ Development
 
+The repo is a bun workspace monorepo:
+
+| Package | What it is |
+|---------|-----------|
+| `packages/contracts/http` | `@redline/http-contracts` — shared Zod wire schemas (zod only) |
+| `packages/server` | `redline` — the Fastify API, artifact store, agent lanes |
+| `packages/ui` | `@redline/ui` — React 19 + Vite + Tailwind v4 + React Query app |
+
 ```bash
 git clone https://github.com/codenamegary/redline.git && cd redline
 bash install.sh --from-source --with-pi --with-opencode   # optional harness wiring
-bun run check          # lint + typecheck + test
-bun run lint           # oxlint --deny-warnings
-bun run typecheck      # tsc --noEmit
-bun test               # bun test runner
+bun install
+bun run dev           # API on :4738 + Vite dev server on :4739 (proxies /api and artifact files)
+bun run check         # lint + typecheck + test across all workspaces
+bun run build:web     # build the SPA into dist/web
+bun run serve         # single process on :4739: API + artifact files + built SPA
 ```
 
-Running `install.sh` from a checkout automatically uses source mode, so the daemon runs your checkout. Node 22+ works too: `npx tsx src/main.ts serve` (the npm `bin` entry uses tsx). Runtime dependencies: fastify, zod, typebox.
+Local dev runs two processes: Vite owns `:4739` (the port skills already use) and proxies `/api` plus `/a/:id/:version/*` files to the API on `:4738`. Production is one process: the server serves the JSON API, artifact files, hashed `assets/` from `dist/web`, and falls back to the SPA's `index.html` for HTML navigations — anything else (curl, agents, API typos) still gets Problem Details 404s. Running `install.sh` from a checkout automatically uses source mode. Node 22+ works too: `npx tsx packages/server/src/main.ts serve`. Runtime dependencies: fastify, zod, typebox.
 
 Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org) — squash-merge PRs with a conventional title (`feat: …`, `fix: …`) and release-please handles the rest.
 

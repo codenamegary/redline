@@ -1,0 +1,26 @@
+{
+  "name": "@redline/http-contracts",
+  "private": true,
+  "version": "0.4.1",
+  "description": "Shared Zod wire schemas for the redline server and web app.",
+  "type": "module",
+  "license": "MIT",
+  "exports": {
+    "./artifact.models": "./src/artifact.models.ts",
+    "./artifact.schemas": "./src/artifact.schemas.ts",
+    "./settings.models": "./src/settings.models.ts"
+  },
+  "scripts": {
+    "lint": "oxlint --deny-warnings",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0",
+    "oxlint": "^1.80.0",
+    "typescript": "~6.0.2",
+    "oxlint-tsgolint": "^7.0.2001"
+  }
+}

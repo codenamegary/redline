@@ -68,7 +68,7 @@ done
 if [ -n "${REDLINE_APP:-}" ]; then
   APP_DIR="$REDLINE_APP"
   FROM_SOURCE=1
-elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$REDLINE_HOME/app" ] && [ -f "$SCRIPT_DIR/src/main.ts" ]; then
+elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$REDLINE_HOME/app" ] && [ -f "$SCRIPT_DIR/packages/server/src/main.ts" ]; then
   APP_DIR="$SCRIPT_DIR"
   FROM_SOURCE=1
 else
@@ -127,9 +127,9 @@ start_daemon() {
     (
       cd "$APP_DIR"
       if [ -n "$BUN" ]; then
-        nohup "$BUN" run src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
+        nohup "$BUN" run packages/server/src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
       else
-        nohup npx -y tsx src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
+        nohup npx -y tsx packages/server/src/main.ts serve >> "$REDLINE_HOME/server.log" 2>&1 &
       fi
       disown 2>/dev/null || true
     )
@@ -206,14 +206,14 @@ download_release() {
 # ---------- source checkout ----------
 
 ensure_app() {
-  if [ -f "$APP_DIR/src/main.ts" ]; then
+  if [ -f "$APP_DIR/packages/server/src/main.ts" ]; then
     return 0
   fi
   have git || die "git is required to install redline (apt install git / brew install git)"
   say "cloning redline into $APP_DIR"
   mkdir -p "$(dirname "$APP_DIR")"
   git clone --depth 1 "$REPO_URL" "$APP_DIR" >&2
-  [ -f "$APP_DIR/src/main.ts" ] || die "clone succeeded but $APP_DIR/src/main.ts is missing"
+  [ -f "$APP_DIR/packages/server/src/main.ts" ] || die "clone succeeded but $APP_DIR/packages/server/src/main.ts is missing"
 }
 
 ensure_deps() {
@@ -328,7 +328,7 @@ let json = {}
 try { json = JSON.parse(fs.readFileSync(file, "utf8")) } catch {}
 const extensions = new Set(json.extensions ?? [])
 const skills = new Set(json.skills ?? [])
-extensions.add(path.join(app, "src", "pi", "redline.extension.ts"))
+extensions.add(path.join(app, "packages", "server", "src", "pi", "redline.extension.ts"))
 skills.add(path.join(app, "skills", "redline"))
 json.extensions = [...extensions]
 json.skills = [...skills]
@@ -347,8 +347,8 @@ wire_opencode() {
   plugin_dir="$HOME/.config/opencode/plugin"
   mkdir -p "$plugin_dir"
   plugin_target="$plugin_dir/redline.ts"
-  ln -sfn "$APP_DIR/src/opencode/redline.plugin.ts" "$plugin_target"
-  say "plugin linked: $plugin_target -> $APP_DIR/src/opencode/redline.plugin.ts"
+  ln -sfn "$APP_DIR/packages/server/src/opencode/redline.plugin.ts" "$plugin_target"
+  say "plugin linked: $plugin_target -> $APP_DIR/packages/server/src/opencode/redline.plugin.ts"
 
   if [ ! -d "$HOME/.config/opencode/node_modules/@opencode-ai/plugin" ]; then
     say "installing @opencode-ai/plugin into ~/.config/opencode"
@@ -388,7 +388,7 @@ EOF
 # ---------- main ----------
 
 if [ "$FROM_SOURCE" -eq 1 ]; then
-  [ -f "$APP_DIR/src/main.ts" ] || die "no redline app at $APP_DIR (set REDLINE_APP or run install.sh from a checkout)"
+  [ -f "$APP_DIR/packages/server/src/main.ts" ] || die "no redline app at $APP_DIR (set REDLINE_APP or run install.sh from a checkout)"
 else
   have curl || die "curl is required to install redline"
 fi

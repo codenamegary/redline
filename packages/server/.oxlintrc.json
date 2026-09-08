@@ -1,0 +1,34 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "options": {
+    "typeAware": true
+  },
+  "plugins": ["typescript", "oxc", "unicorn", "import"],
+  "rules": {
+    "typescript/consistent-type-imports": [
+      "error",
+      { "prefer": "no-type-imports" }
+    ],
+    "typescript/consistent-type-definitions": ["error", "type"],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "max-classes-per-file": ["error", { "max": 0 }],
+    "typescript/no-extraneous-class": "error",
+    "oxc/no-barrel-file": ["error", { "threshold": 0 }],
+    "import/no-default-export": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/filename-case": ["error", { "case": "lowercase" }],
+    "prefer-const": "error",
+    "no-var": "error",
+    "no-param-reassign": ["error", { "props": true }]
+  },
+  "overrides": [
+    {
+      "files": ["src/pi/**/*.ts"],
+      "rules": {
+        "import/no-default-export": "off",
+        "typescript/consistent-type-imports": "off"
+      }
+    }
+  ]
+}

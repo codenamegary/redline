@@ -1,53 +1,27 @@
 {
-  "name": "redline",
+  "name": "redline-monorepo",
+  "private": true,
   "version": "0.4.1",
   "description": "Local review server for AI-generated design artifacts. The agent renders, the human redlines.",
   "type": "module",
   "license": "MIT",
   "packageManager": "bun@1.4.2",
-  "keywords": [
-    "pi-package"
+  "workspaces": [
+    "packages/*",
+    "packages/*/*"
   ],
   "engines": {
     "node": ">=22"
   },
-  "bin": {
-    "redline": "./bin/redline.js"
-  },
-  "files": [
-    "bin",
-    "src",
-    "skills",
-    "install.sh"
-  ],
-  "pi": {
-    "extensions": [
-      "./src/pi/redline.extension.ts"
-    ],
-    "skills": [
-      "./skills"
-    ]
-  },
   "scripts": {
-    "dev": "bun run src/main.ts serve",
-    "serve": "bun run src/main.ts serve",
-    "lint": "oxlint --deny-warnings",
-    "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "dev": "bun run --parallel --filter redline --filter @redline/ui dev",
+    "dev:server": "bun run --filter redline dev",
+    "dev:ui": "bun run --filter @redline/ui dev",
+    "serve": "bun run --filter redline serve",
+    "build:web": "bun run --filter @redline/ui build",
+    "lint": "bun run --filter '*' lint",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
     "check": "bun run lint && bun run typecheck && bun run test"
-  },
-  "dependencies": {
-    "fastify": "^5.12.1",
-    "typebox": "^1.3.25",
-    "zod": "^4.5.4"
-  },
-  "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@opencode-ai/plugin": "1.18.16",
-    "@types/bun": "^1.4.0",
-    "oxlint": "^1.80.0",
-    "oxlint-tsgolint": "^7.0.2001",
-    "tsx": "^4.23.13",
-    "typescript": "~6.0.2"
   }
 }
