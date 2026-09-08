@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/codenamegary/redline/compare/v0.4.1...v0.4.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **ui:** never block Iterate on agent attachment ([#28](https://github.com/codenamegary/redline/issues/28)) ([e8bc11e](https://github.com/codenamegary/redline/commit/e8bc11e10c2db458bb436e54ee4253cb80387f1d))
+
 ## [0.4.1](https://github.com/codenamegary/redline/compare/v0.4.0...v0.4.1) (2026-09-08)
 
 
