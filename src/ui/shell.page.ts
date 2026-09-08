@@ -34,7 +34,6 @@ export const clientScript = `(function () {
     version: data.current,
     current: data.current,
     status: data.status,
-    attached: false,
     reviewerAttached: false,
     workerRunning: false,
     threads: [],
@@ -124,7 +123,6 @@ export const clientScript = `(function () {
       var prevStatus = state.status
       state.threads = view.threads
       state.status = view.artifactStatus
-      state.attached = view.agentAttached === true
       state.reviewerAttached = view.reviewerAttached === true
       state.workerRunning = view.workerRunning === true
       state.current = view.current
@@ -177,22 +175,28 @@ export const clientScript = `(function () {
     var approved = review && currentApprovedAt() !== undefined
     statusEl.textContent = approved ? "approved" : iterating ? "iterating" : review ? "in review" : "draft"
     statusEl.className = "pill " + (approved ? "approved" : state.status)
-    presenceEl.className = "presence " + (iterating ? "working" : state.attached ? "on" : "off")
+    // Agents start on demand (worker dispatch attaches lazily, the reviewer
+    // binds on the first comment), so live presence is status color only —
+    // never a gate on Iterate.
+    presenceEl.className =
+      iterating || state.workerRunning
+        ? "presence working"
+        : state.reviewerAttached
+          ? "presence on"
+          : "presence"
     presenceLabel.textContent = state.workerRunning
       ? "worker running"
       : iterating
         ? "agent working"
         : state.reviewerAttached
-          ? "reviewer attached"
-          : state.attached
-            ? "waiting in agent"
-            : "no agent"
-    iterateBtn.disabled = !review || !state.attached
+          ? "reviewer live"
+          : "agents start on demand"
+    iterateBtn.disabled = !review
     iterateBtn.title = iterating
       ? "Agent is already iterating"
-      : review && !state.attached
-        ? "Agent not attached - nudge it in chat, then Iterate"
-        : "Send open threads to the agent as one batch"
+      : review
+        ? "Send open threads to the agent as one batch"
+        : "Finish the iterating round first"
     approveBtn.disabled = !review || approved
     approveBtn.textContent = approved ? "Approved" : "Approve"
     approveBtn.title = approved
@@ -445,6 +449,12 @@ export const clientScript = `(function () {
     api("/artifacts/" + data.artifactId + "/iterations", jsonMethod("POST", {})).then(function () {
       state.followCurrent = true
       refresh()
+    }).catch(function (error) {
+      // The route can still refuse (worker busy, nothing open): show why and
+      // let the user retry. The next poll re-renders and clears the banner.
+      iterateBtn.disabled = false
+      bannerEl.textContent = String(error && error.message ? error.message : error)
+      bannerEl.hidden = false
     })
   })
 
@@ -510,7 +520,6 @@ export const clientScript = `(function () {
       state.snapshot = snapshot
       state.threads = view.threads
       state.status = view.artifactStatus
-      state.attached = view.agentAttached === true
       state.reviewerAttached = view.reviewerAttached === true
       state.workerRunning = view.workerRunning === true
       state.current = view.current
@@ -630,7 +639,7 @@ export const renderShellPage = (data: ShellData): string => {
   <a class="brand" href="/">redline</a>
   <span id="title">${title}</span>
   ${statusPill}
-  <span id="presence" class="presence off"><span class="dot"></span><span id="presence-label">checking&hellip;</span></span>
+  <span id="presence" class="presence"><span class="dot"></span><span id="presence-label">checking&hellip;</span></span>
   <label>Version <select id="version"></select></label>
   <label><input type="checkbox" id="ding"> ding when done</label>
   <span class="spacer"></span>
