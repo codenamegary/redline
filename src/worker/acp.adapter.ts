@@ -6,7 +6,10 @@ import { buildLanePrompt, buildSeedContext, parseLaneResult } from "./duty.promp
 import { AgentSession, DutyInput, DutyResult, HostAdapter, Lane, SeedSpec } from "./host.adapter"
 import { isRecord } from "./util"
 
-const defaultTimeoutSeconds = 300
+// (#23) Workers can run long: a big iteration (whole-page rework, asset-heavy
+// publish) easily exceeds five minutes. 15 minutes is the ceiling before the
+// lane is failed and the user can re-Iterate.
+export const defaultTimeoutSeconds = 900
 // Handshakes (initialize + session/new) are fast ops; a fixed deadline keeps
 // a wedged agent from holding a spawn forever regardless of duty timeout.
 const handshakeTimeoutSeconds = 15
