@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/codenamegary/redline/compare/v0.4.0...v0.4.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **worker:** raise default agent duty timeout from 5m to 15m ([#25](https://github.com/codenamegary/redline/issues/25)) ([4497811](https://github.com/codenamegary/redline/commit/4497811e080f19c648ec70f5116d032ba14be78f))
+
 ## [0.4.0](https://github.com/codenamegary/redline/compare/v0.3.0...v0.4.0) (2026-09-08)
 
 
