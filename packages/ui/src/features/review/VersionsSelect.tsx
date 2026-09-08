@@ -1,4 +1,4 @@
-import type { ArtifactVersion, Version } from "@redline/http-contracts/artifact.models"
+import { ArtifactVersion, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
 
 // Dropdown label: version, then note and state chips the way the review
@@ -23,7 +23,7 @@ export const VersionsSelect: React.FC<VersionsSelectProps> = ({ versions, value,
       Version
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value as Version)}
+        onChange={(event) => onChange(event.target.value)}
         className="max-w-[14rem] rounded-md border border-edge-strong bg-panel px-2 py-1 text-[13px] text-fog"
       >
         {versions.map((entry) => (

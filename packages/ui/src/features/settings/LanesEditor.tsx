@@ -1,5 +1,4 @@
-import type { LaneAdapter, LanePreset } from "@redline/http-contracts/settings.models"
-import type { SettingsDefaults } from "@redline/http-contracts/settings.models"
+import { LaneAdapter, LanePreset, SettingsDefaults } from "@redline/http-contracts/settings.models"
 import React from "react"
 
 export type LaneId = "reviewer" | "worker"

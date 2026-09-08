@@ -1,24 +1,15 @@
-import { isPendingVersion } from "@redline/http-contracts/artifact.models"
-import type { Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
+import { isPendingVersion, Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
 import { Link } from "react-router"
-
-import { Spinner } from "../../components/spinner"
-import { StatusBadge } from "../../components/status.badge"
-import { numberedPins, PinsOverlay } from "./pins.overlay"
-import { PresenceBadge } from "./presence.badge"
-import {
-  useApproveMutation,
-  useArtifactQuery,
-  useCreateThreadMutation,
-  useFeedbackQuery,
-  useIterateMutation,
-  useReplyMutation,
-  useThreadStatusMutation,
-} from "./queries"
-import { ThreadsComposer } from "./threads.composer"
-import { ThreadsPanel } from "./threads.panel"
-import { VersionsSelect } from "./versions.select"
+import { Spinner } from "../../components/Spinner"
+import { StatusBadge } from "../../components/StatusBadge"
+import { numberedPins, PinsOverlay } from "./PinsOverlay"
+import { PinOffset } from "./PinsOverlay"
+import { PresenceBadge } from "./PresenceBadge"
+import { useApproveMutation, useArtifactQuery, useCreateThreadMutation, useFeedbackQuery, useIterateMutation, useReplyMutation, useThreadStatusMutation } from "./queries"
+import { ThreadsComposer } from "./ThreadsComposer"
+import { ThreadsPanel } from "./ThreadsPanel"
+import { VersionsSelect } from "./VersionsSelect"
 
 export type ReviewShellProps = {
   id: string
@@ -48,7 +39,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const [activeThreadId, setActiveThreadId] = React.useState<string | undefined>(undefined)
   const [dingOn, setDingOn] = React.useState(dingPreference)
   const frameRef = React.useRef<HTMLIFrameElement>(null)
-  const [frameEpoch, setFrameEpoch] = React.useState(0)
+  const [pinOffset, setPinOffset] = React.useState<PinOffset>({ x: 0, y: 0 })
   const previousStatus = React.useRef<string | undefined>(undefined)
 
   const status = view?.artifactStatus
@@ -143,7 +134,13 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
       style.textContent = ".redline-flash { outline: 3px solid #e5484d !important; outline-offset: 2px; }"
       doc.head.appendChild(style)
     }
-    setFrameEpoch((epoch) => epoch + 1)
+    const win = frameRef.current?.contentWindow ?? null
+    if (win !== null) {
+      const sync = () => setPinOffset({ x: win.scrollX, y: win.scrollY })
+      win.addEventListener("scroll", sync, true)
+      win.addEventListener("resize", sync)
+      sync()
+    }
   }
 
   const buttonBase =
@@ -250,7 +247,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
           <PinsOverlay
             pins={pins}
             armed={pinMode && review}
-            epoch={frameEpoch}
+            offset={pinOffset}
             frameRef={frameRef}
             onSelect={(pin) => focusThread(pin.thread)}
             onPick={(pick) => {

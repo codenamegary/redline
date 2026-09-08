@@ -1,7 +1,6 @@
-import type { Thread, ThreadStatus, Version } from "@redline/http-contracts/artifact.models"
+import { Thread, ThreadStatus, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
-
-import { Spinner } from "../../components/spinner"
+import { Spinner } from "../../components/Spinner"
 
 export type ThreadsPanelProps = {
   threads: Thread[]

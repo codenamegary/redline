@@ -1,12 +1,10 @@
-import type { LaneConfig, RedlineSettings } from "@redline/http-contracts/settings.models"
-import { RedlineSettingsSchema } from "@redline/http-contracts/settings.models"
+import { LaneConfig, RedlineSettings, RedlineSettingsSchema } from "@redline/http-contracts/settings.models"
 import React from "react"
 import { Link } from "react-router"
-
-import { SiteHeader } from "../../components/site.header"
-import { Spinner } from "../../components/spinner"
-import { LanesEditor, laneIds, type LaneForm, type LaneId } from "./lanes.editor"
-import { PromptsEditor } from "./prompts.editor"
+import { SiteHeader } from "../../components/SiteHeader"
+import { Spinner } from "../../components/Spinner"
+import { LanesEditor, laneIds, LaneForm, LaneId } from "./LanesEditor"
+import { PromptsEditor } from "./PromptsEditor"
 import { useDefaultsQuery, useProbeMutation, useSaveSettingsMutation, useSettingsQuery } from "./queries"
 
 const tagline = "agent lanes, prompt templates, and origin notifications"
@@ -110,16 +108,24 @@ export const SettingsPage: React.FC = () => {
   const probe = useProbeMutation()
 
   const [tab, setTab] = React.useState<TabId>("reviewer")
-  const [form, setForm] = React.useState<SettingsForm | undefined>(undefined)
+  const [draft, setDraft] = React.useState<SettingsForm | undefined>(undefined)
   const [toast, setToast] = React.useState<{ message: string; ok: boolean } | undefined>(undefined)
 
-  React.useEffect(() => {
-    if (form === undefined && settingsQuery.data !== undefined) {
-      setForm(settingsFormFrom(settingsQuery.data))
-    }
-  }, [form, settingsQuery.data])
+  const settings = settingsQuery.data
+  const form = draft ?? (settings !== undefined ? settingsFormFrom(settings) : undefined)
 
   const show = (message: string, ok: boolean) => setToast({ message: message, ok: ok })
+
+  if (settingsQuery.isError) {
+    return (
+      <div className="min-h-screen">
+        <SiteHeader tagline={tagline} />
+        <main className="px-7 pt-5 pb-10">
+          <p className="text-warn">{settingsQuery.error.message}</p>
+        </main>
+      </div>
+    )
+  }
 
   if (settingsQuery.isPending || form === undefined) {
     return (
@@ -134,21 +140,11 @@ export const SettingsPage: React.FC = () => {
     )
   }
 
-  if (settingsQuery.isError) {
-    return (
-      <div className="min-h-screen">
-        <SiteHeader tagline={tagline} />
-        <main className="px-7 pt-5 pb-10">
-          <p className="text-warn">{settingsQuery.error.message}</p>
-        </main>
-      </div>
-    )
-  }
-
   const updateLane = (lane: LaneId, update: Partial<LaneForm>) =>
-    setForm((previous) =>
-      previous === undefined ? previous : { ...previous, [lane]: { ...previous[lane], ...update } },
-    )
+    setDraft((previous) => {
+      const base = previous ?? form
+      return { ...base, [lane]: { ...base[lane], ...update } }
+    })
 
   const saveForm = () => {
     save.mutate(settingsPayload(form), {
@@ -217,20 +213,18 @@ export const SettingsPage: React.FC = () => {
                 value={form.prompts[tab as LaneId]}
                 disabled={save.isPending}
                 onChange={(value) =>
-                  setForm((previous) =>
-                    previous === undefined
-                      ? previous
-                      : { ...previous, prompts: { ...previous.prompts, [tab]: value } },
-                  )
+                  setDraft((previous) => {
+                    const base = previous ?? form
+                    return { ...base, prompts: { ...base.prompts, [tab]: value } }
+                  })
                 }
                 onReset={() => {
                   const shipped = defaultsQuery.data?.prompts[tab as LaneId]
                   if (shipped === undefined) return
-                  setForm((previous) =>
-                    previous === undefined
-                      ? previous
-                      : { ...previous, prompts: { ...previous.prompts, [tab]: shipped } },
-                  )
+                  setDraft((previous) => {
+                    const base = previous ?? form
+                    return { ...base, prompts: { ...base.prompts, [tab]: shipped } }
+                  })
                   show("template reset (unsaved — hit Save)", true)
                 }}
               />
@@ -244,11 +238,10 @@ export const SettingsPage: React.FC = () => {
                 <select
                   value={form.notifyOrigin ? "true" : "false"}
                   onChange={(event) =>
-                    setForm((previous) =>
-                      previous === undefined
-                        ? previous
-                        : { ...previous, notifyOrigin: event.target.value === "true" },
-                    )
+                    setDraft((previous) => {
+                      const base = previous ?? form
+                      return { ...base, notifyOrigin: event.target.value === "true" }
+                    })
                   }
                   className={inputClass}
                 >
@@ -264,11 +257,10 @@ export const SettingsPage: React.FC = () => {
                   spellCheck={false}
                   autoComplete="off"
                   onChange={(event) =>
-                    setForm((previous) =>
-                      previous === undefined
-                        ? previous
-                        : { ...previous, opencodeServerUrl: event.target.value },
-                    )
+                    setDraft((previous) => {
+                      const base = previous ?? form
+                      return { ...base, opencodeServerUrl: event.target.value }
+                    })
                   }
                   className={inputClass}
                 />
@@ -286,11 +278,10 @@ export const SettingsPage: React.FC = () => {
                   type="checkbox"
                   checked={form.imageGen.enabled}
                   onChange={(event) =>
-                    setForm((previous) =>
-                      previous === undefined
-                        ? previous
-                        : { ...previous, imageGen: { ...previous.imageGen, enabled: event.target.checked } },
-                    )
+                    setDraft((previous) => {
+                      const base = previous ?? form
+                      return { ...base, imageGen: { ...base.imageGen, enabled: event.target.checked } }
+                    })
                   }
                   className="size-4 cursor-pointer accent-redline"
                 />
@@ -309,11 +300,10 @@ export const SettingsPage: React.FC = () => {
                   spellCheck={false}
                   autoComplete="off"
                   onChange={(event) =>
-                    setForm((previous) =>
-                      previous === undefined
-                        ? previous
-                        : { ...previous, imageGen: { ...previous.imageGen, agent: event.target.value } },
-                    )
+                    setDraft((previous) => {
+                      const base = previous ?? form
+                      return { ...base, imageGen: { ...base.imageGen, agent: event.target.value } }
+                    })
                   }
                   className={inputClass}
                 />
@@ -328,11 +318,10 @@ export const SettingsPage: React.FC = () => {
                   spellCheck={false}
                   autoComplete="off"
                   onChange={(event) =>
-                    setForm((previous) =>
-                      previous === undefined
-                        ? previous
-                        : { ...previous, imageGen: { ...previous.imageGen, model: event.target.value } },
-                    )
+                    setDraft((previous) => {
+                      const base = previous ?? form
+                      return { ...base, imageGen: { ...base.imageGen, model: event.target.value } }
+                    })
                   }
                   className={inputClass}
                 />

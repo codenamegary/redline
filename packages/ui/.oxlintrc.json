@@ -1,14 +1,62 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc", "unicorn"],
+  "options": {
+    "typeAware": true
+  },
+  "plugins": ["typescript", "oxc", "unicorn", "import", "react"],
   "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }],
-    "typescript/no-explicit-any": "error",
+    "typescript/consistent-type-imports": [
+      "error",
+      { "prefer": "no-type-imports" }
+    ],
     "typescript/consistent-type-definitions": ["error", "type"],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unnecessary-type-assertion": "error",
+    "max-classes-per-file": ["error", { "max": 0 }],
+    "typescript/no-extraneous-class": "error",
+    "oxc/no-barrel-file": ["error", { "threshold": 0 }],
     "import/no-default-export": "error",
-    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
-    "no-var": "error",
-    "prefer-const": "error"
-  }
+    "react/function-component-definition": [
+      "error",
+      {
+        "namedComponents": "arrow-function",
+        "unnamedComponents": "arrow-function"
+      }
+    ],
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/filename-case": ["error", { "case": "lowercase" }],
+    "prefer-const": "error",
+    "no-var": "error"
+  },
+  "overrides": [
+    {
+      "files": ["*.{ts,tsx}"],
+      "rules": {
+        "no-param-reassign": ["error", { "props": true }]
+      }
+    },
+    {
+      "files": ["**/*.tsx"],
+      "rules": {
+        "unicorn/filename-case": [
+          "error",
+          {
+            "case": "pascalCase"
+          }
+        ]
+      }
+    },
+    {
+      "files": ["main.tsx", "*.test.tsx", "*.test.ts", "src/test/*.ts"],
+      "rules": {
+        "unicorn/filename-case": ["error", { "case": "lowercase" }]
+      }
+    },
+    {
+      "files": ["**/vite.config.ts", "**/vitest.config.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ]
 }

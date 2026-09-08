@@ -1,6 +1,5 @@
 import React from "react"
-
-import { primaryButtonClass, secondaryButtonClass } from "../gallery/create.dialog"
+import { primaryButtonClass, secondaryButtonClass } from "../gallery/CreateDialog"
 
 export type ThreadsComposerProps = {
   target: string

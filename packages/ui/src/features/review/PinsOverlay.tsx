@@ -1,5 +1,5 @@
 import { AnchorSchema } from "@redline/http-contracts/artifact.models"
-import type { Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
+import { Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
 
 export type NumberedPin = {
@@ -28,6 +28,11 @@ export type PinPick = {
   label: string
 }
 
+export type PinOffset = {
+  x: number
+  y: number
+}
+
 const cssEscape = (value: string): string => {
   const escape = (globalThis as { CSS?: { escape?: (input: string) => string } }).CSS?.escape
   return escape !== undefined ? escape(value) : value.replace(/([^a-zA-Z0-9_-])/g, "\\$1")
@@ -35,7 +40,7 @@ const cssEscape = (value: string): string => {
 
 // CSS selector for an element inside the artifact iframe: prefers the
 // nearest id, otherwise walks up building nth-of-type segments.
-const buildSelector = (doc: Document, element: Element): string => {
+export const buildSelector = (doc: Document, element: Element): string => {
   if (element.id.length > 0) return "#" + cssEscape(element.id)
   const parts: string[] = []
   let node: Element | null = element
@@ -82,7 +87,7 @@ const pickAnchor = (doc: Document, win: Window, element: Element): PinPick | und
 export type PinsOverlayProps = {
   pins: NumberedPin[]
   armed: boolean
-  epoch: number
+  offset: PinOffset
   frameRef: React.RefObject<HTMLIFrameElement | null>
   onSelect: (pin: NumberedPin) => void
   onPick: (pick: PinPick) => void
@@ -91,25 +96,11 @@ export type PinsOverlayProps = {
 export const PinsOverlay: React.FC<PinsOverlayProps> = ({
   pins,
   armed,
-  epoch,
+  offset,
   frameRef,
   onSelect,
   onPick,
 }) => {
-  const [, setScrollTick] = React.useState(0)
-
-  React.useEffect(() => {
-    const win = frameRef.current?.contentWindow ?? null
-    if (win === null) return
-    const rerender = () => setScrollTick((tick) => tick + 1)
-    win.addEventListener("scroll", rerender, true)
-    win.addEventListener("resize", rerender)
-    return () => {
-      win.removeEventListener("scroll", rerender, true)
-      win.removeEventListener("resize", rerender)
-    }
-  }, [epoch, frameRef])
-
   const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
     if (!armed) return
     event.preventDefault()
@@ -131,8 +122,7 @@ export const PinsOverlay: React.FC<PinsOverlayProps> = ({
     >
       {pins.map((pin) => {
         const rect = pin.thread.anchor?.rect
-        const win = frameRef.current?.contentWindow ?? null
-        if (rect === undefined || win === null) return null
+        if (rect === undefined) return null
         const text = pin.thread.anchor?.text
         return (
           <button
@@ -143,7 +133,7 @@ export const PinsOverlay: React.FC<PinsOverlayProps> = ({
               event.stopPropagation()
               onSelect(pin)
             }}
-            style={{ left: String(rect.x - win.scrollX) + "px", top: String(rect.y - win.scrollY) + "px" }}
+            style={{ left: String(rect.x - offset.x) + "px", top: String(rect.y - offset.y) + "px" }}
             className="pointer-events-auto absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-redline text-xs font-bold text-white shadow-[0_2px_6px_rgba(0,0,0,0.35)]"
           >
             {String(pin.number)}

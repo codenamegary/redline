@@ -1,7 +1,5 @@
+import { CreateArtifactBody } from "@redline/http-contracts/artifact.schemas"
 import React from "react"
-
-import type { CreateArtifactBody } from "@redline/http-contracts/artifact.schemas"
-
 import { useCreateArtifactMutation } from "./queries"
 
 export type CreateDialogProps = {

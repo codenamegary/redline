@@ -1,9 +1,6 @@
+import { Thread, Version, AnchorSchema } from "@redline/http-contracts/artifact.models"
 import { describe, expect, it } from "vitest"
-
-import type { Thread, Version } from "@redline/http-contracts/artifact.models"
-import { AnchorSchema } from "@redline/http-contracts/artifact.models"
-
-import { numberedPins } from "./pins.overlay"
+import { numberedPins } from "./PinsOverlay"
 
 const thread = (overrides: Partial<Thread> & Pick<Thread, "id">): Thread => ({
   status: "open",
@@ -23,14 +20,14 @@ const pinnedThread = (id: string, y: number, extra: Partial<Thread> = {}): Threa
   })
 
 describe("numberedPins", () => {
-  const version = "v2" as Version
+  const version: Version = "v2"
 
   it("numbers only open pinned threads on the viewed version, oldest first", () => {
     const threads = [
       pinnedThread("c", 3, { createdAt: "2026-09-07T12:00:00.000Z" }),
       pinnedThread("a", 1),
       thread({ id: "b", status: "resolved", anchor: { selector: "#c", text: "c", rect: { x: 10, y: 2, width: 100, height: 20 } } }),
-      pinnedThread("d", 4, { anchorVersion: "v1" as Version }),
+      pinnedThread("d", 4, { anchorVersion: "v1" }),
       thread({ id: "e" }),
     ]
     const pins = numberedPins(threads, version)

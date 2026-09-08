@@ -2,9 +2,8 @@ import { QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
-
 import { createQueryClient } from "../../app/query.client"
-import { GalleryPage } from "./page"
+import { GalleryPage } from "./GalleryPage"
 
 const artifacts = [
   {
@@ -28,7 +27,8 @@ describe("GalleryPage", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
-        if (String(input).endsWith("/health")) {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+        if (url.endsWith("/health")) {
           return new Response(JSON.stringify({ ok: true, service: "redline", version: "dev", home: "/home/x/.redline" }))
         }
         return new Response(JSON.stringify(artifacts))

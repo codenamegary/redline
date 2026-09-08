@@ -1,12 +1,11 @@
-import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Plus } from "lucide-react"
-
+import React from "react"
 import { queryKeys } from "../../app/api/query.keys"
-import { SiteHeader } from "../../components/site.header"
-import { Spinner } from "../../components/spinner"
-import { ArtifactCard } from "./artifact.card"
-import { CreateDialog } from "./create.dialog"
+import { SiteHeader } from "../../components/SiteHeader"
+import { Spinner } from "../../components/Spinner"
+import { ArtifactCard } from "./ArtifactCard"
+import { CreateDialog } from "./CreateDialog"
 import { useArtifactsQuery, useHealthQuery } from "./queries"
 
 const tagline = "review loop for design artifacts: architecture docs, decision records, API contracts, diagrams, UI mockups"

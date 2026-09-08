@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
-
-import { splitCommand } from "./page"
+import { splitCommand } from "./SettingsPage"
 
 describe("splitCommand", () => {
   it("splits on whitespace and honors double quotes", () => {

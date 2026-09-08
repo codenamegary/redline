@@ -1,10 +1,8 @@
+import { ArtifactSummary } from "@redline/http-contracts/artifact.schemas"
 import React from "react"
 import { Link } from "react-router"
-
-import type { ArtifactSummary } from "@redline/http-contracts/artifact.schemas"
-
 import { countLabel, shortDate } from "../../components/format"
-import { StatusBadge } from "../../components/status.badge"
+import { StatusBadge } from "../../components/StatusBadge"
 
 export type ArtifactCardProps = {
   item: ArtifactSummary

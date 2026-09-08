@@ -1,24 +1,15 @@
-export type ProblemDetails = {
-  type: string
-  title: string
+import { ProblemDetails } from "./problem.details"
+
+export type ApiError = Error & {
   status: number
-  detail?: string
-}
-
-export class ApiError extends Error {
-  readonly status: number
-  readonly problem: ProblemDetails | undefined
-
-  constructor(message: string, status: number, problem?: ProblemDetails) {
-    super(message)
-    this.name = "ApiError"
-    this.status = status
-    this.problem = problem
-  }
+  problem: ProblemDetails | undefined
 }
 
 const isProblemDetails = (value: unknown): value is ProblemDetails =>
   typeof value === "object" && value !== null && "title" in value && "status" in value
+
+const apiError = (message: string, status: number, problem?: ProblemDetails): ApiError =>
+  Object.assign(new Error(message), { name: "ApiError", status: status, problem: problem })
 
 const parseBody = async (response: Response): Promise<unknown> => {
   const text = await response.text()
@@ -36,7 +27,7 @@ export const request = async (path: string, init?: RequestInit): Promise<unknown
   if (!response.ok) {
     const problem = isProblemDetails(body) ? body : undefined
     const message = problem?.detail ?? problem?.title ?? "request failed (" + String(response.status) + ")"
-    throw new ApiError(message, response.status, problem)
+    throw apiError(message, response.status, problem)
   }
   return body
 }

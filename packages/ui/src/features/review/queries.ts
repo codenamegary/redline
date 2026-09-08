@@ -1,9 +1,6 @@
+import { ThreadStatus, Version, ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
+import { FeedbackViewSchema, FeedbackView } from "@redline/http-contracts/artifact.schemas"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import type { ThreadStatus, Version } from "@redline/http-contracts/artifact.models"
-import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
-import { FeedbackViewSchema } from "@redline/http-contracts/artifact.schemas"
-import type { FeedbackView } from "@redline/http-contracts/artifact.schemas"
-
 import { httpGet, httpPatch, httpPost } from "../../app/api/client"
 import { queryKeys } from "../../app/api/query.keys"
 

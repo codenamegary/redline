@@ -1,10 +1,5 @@
+import { RedlineSettingsSchema, SettingsDefaultsSchema, RedlineSettings, SettingsDefaults } from "@redline/http-contracts/settings.models"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  RedlineSettingsSchema,
-  SettingsDefaultsSchema,
-} from "@redline/http-contracts/settings.models"
-import type { RedlineSettings, SettingsDefaults } from "@redline/http-contracts/settings.models"
-
 import { httpGet, httpPost, httpPut } from "../../app/api/client"
 import { queryKeys } from "../../app/api/query.keys"
 

@@ -1,8 +1,5 @@
-import type { LaneId } from "./lanes.editor"
-import { laneLabel } from "./lanes.editor"
 import React from "react"
-
-import { secondaryButton } from "./lanes.editor"
+import { LaneId, laneLabel, secondaryButton } from "./LanesEditor"
 
 export type PromptsEditorProps = {
   lane: LaneId

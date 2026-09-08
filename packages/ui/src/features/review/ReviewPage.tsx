@@ -1,6 +1,5 @@
 import { useParams } from "react-router"
-
-import { ReviewShell } from "./shell"
+import { ReviewShell } from "./ReviewShell"
 
 export const ReviewPage = () => {
   const { id } = useParams()

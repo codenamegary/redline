@@ -1,7 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-
-import { ApiError } from "./client"
-import { request } from "./client"
+import { ApiError, request } from "./client"
 
 const jsonResponse = (status: number, body: unknown): Response =>
   new Response(body === undefined ? "" : JSON.stringify(body), {
@@ -19,23 +17,23 @@ describe("request", () => {
     await expect(request("/x")).resolves.toEqual({ ok: true })
   })
 
-  it("throws ApiError with the problem detail", async () => {
+  it("throws an ApiError shape with the problem detail", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         jsonResponse(409, { type: "about:blank", title: "Conflict", status: 409, detail: "worker busy" }),
       ),
     )
-    const error = await request("/x").catch((caught: unknown) => caught)
-    expect(error).toBeInstanceOf(ApiError)
-    expect((error as ApiError).message).toBe("worker busy")
-    expect((error as ApiError).status).toBe(409)
-    expect((error as ApiError).problem?.title).toBe("Conflict")
+    const error = (await request("/x").catch((caught: unknown) => caught)) as ApiError
+    expect(error.name).toBe("ApiError")
+    expect(error.message).toBe("worker busy")
+    expect(error.status).toBe(409)
+    expect(error.problem?.title).toBe("Conflict")
   })
 
   it("falls back to the title when no detail is present", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(404, { title: "Not found", status: 404 })))
-    const error = await request("/x").catch((caught: unknown) => caught)
-    expect((error as ApiError).message).toBe("Not found")
+    const error = (await request("/x").catch((caught: unknown) => caught)) as ApiError
+    expect(error.message).toBe("Not found")
   })
 })

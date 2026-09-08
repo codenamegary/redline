@@ -1,5 +1,5 @@
+import { ArtifactStatus } from "@redline/http-contracts/artifact.models"
 import React from "react"
-import type { ArtifactStatus } from "@redline/http-contracts/artifact.models"
 
 export type StatusBadgeProps = {
   status: ArtifactStatus

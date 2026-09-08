@@ -1,14 +1,11 @@
 import { describe, expect, it } from "vitest"
-
-import type { Version } from "@redline/http-contracts/artifact.models"
-
-import { versionOptionLabel } from "./versions.select"
+import { versionOptionLabel } from "./VersionsSelect"
 
 describe("versionOptionLabel", () => {
   it("joins note and state chips", () => {
     expect(
       versionOptionLabel({
-        version: "v3" as Version,
+        version: "v3",
         createdAt: "2026-09-07T10:00:00.000Z",
         note: "redline pass",
         batch: { threadIds: ["t"], submittedAt: "2026-09-07T11:00:00.000Z" },
@@ -16,7 +13,7 @@ describe("versionOptionLabel", () => {
     ).toBe("v3 · redline pass · awaiting agent")
     expect(
       versionOptionLabel({
-        version: "v1" as Version,
+        version: "v1",
         createdAt: "2026-09-07T10:00:00.000Z",
         approvedAt: "2026-09-07T11:00:00.000Z",
       }),
