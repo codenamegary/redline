@@ -238,6 +238,16 @@ describe("artifact api", () => {
       .parse(detail.json())
     expect(detailBody.versions[0]?.assets).toEqual(["hero.png"])
 
+    // Summaries and the gallery surface the asset count.
+    const listed = await app.inject({ method: "GET", url: "/api/v1/artifacts" })
+    const withCount = z
+      .object({ id: z.string(), assetsCount: z.number() })
+      .parse(listed.json().find((item: { id: string }) => item.id === created.id))
+    expect(withCount.assetsCount).toBe(1)
+
+    const gallery = await app.inject({ method: "GET", url: "/" })
+    expect(gallery.body).toContain("1 image")
+
     const missing = await app.inject({ method: "GET", url: "/a/" + created.id + "/v1/nope.txt" })
     expect(missing.statusCode).toBe(404)
     expect(missing.headers["content-type"]).toContain("application/problem+json")

@@ -69,6 +69,9 @@ export type ArtifactSummary = {
   versionCount: number
   openThreads: number
   reviewUrl: string
+  // Static assets (generated images) across all versions, so the gallery
+  // can show that a review carries images at a glance.
+  assetsCount: number
   // Lane status contract consumed by plugins (Phase 5). reviewer is "starting"
   // between create and the async bind, "idle" once bound, "none" when the
   // configured reviewer adapter is "none". worker reads "idle" whenever a
@@ -105,6 +108,9 @@ const lanePresence = (id: string): { reviewerAttached: boolean; workerRunning: b
 
 const artifactApiUrl = (origin: string, id: string): string => origin + "/api/v1/artifacts/" + id
 
+const assetsCount = (meta: ArtifactMeta): number =>
+  meta.versions.reduce((total, row) => total + (row.assets?.length ?? 0), 0)
+
 const summarizeArtifact = async (
   store: Store,
   origin: string,
@@ -122,6 +128,7 @@ const summarizeArtifact = async (
     versionCount: meta.versions.length,
     openThreads: await countOpenThreads(store, meta.id),
     reviewUrl: origin + "/a/" + meta.id,
+    assetsCount: assetsCount(meta),
     reviewer:
       settings.reviewer.adapter === "none"
         ? "none"

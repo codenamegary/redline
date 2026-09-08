@@ -19,6 +19,7 @@ export const registerUiRoutes = (app: FastifyInstance, store: Store): void => {
         current: meta.current,
         versionCount: meta.versions.length,
         openThreads: await countOpenThreads(store, meta.id),
+        assetsCount: meta.versions.reduce((total, row) => total + (row.assets?.length ?? 0), 0),
         createdAt: meta.createdAt,
         updatedAt: meta.updatedAt,
         reviewUrl: origin + "/a/" + meta.id,
