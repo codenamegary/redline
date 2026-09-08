@@ -12,8 +12,64 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v5
+      - id: release
+        uses: googleapis/release-please-action@v5
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Bot-created releases never fire the `release: published` event (GitHub
+  # suppresses events from GITHUB_TOKEN), so packaging must run here, gated
+  # on the release-please output, instead of relying on release.yml.
+  release-artifacts:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run check
+
+      - name: Build web app
+        run: bun run build:web
+
+      - name: Build and package binaries
+        run: |
+          version="${TAG_NAME#v}"
+          mkdir -p dist/release
+          for target in bun-linux-x64 bun-linux-arm64 bun-darwin-x64 bun-darwin-arm64; do
+            platform="${target#bun-}"
+            name="redline-$version-$platform"
+            bun build --compile --minify \
+              --define "REDLINE_VERSION=\"$version\"" \
+              --target "$target" \
+              packages/server/src/main.ts --outfile "dist/$name"
+            mkdir -p "$name"
+            cp "dist/$name" "$name/redline"
+            cp -r dist/web "$name/web"
+            printf '%s\n' "$version" > "$name/version.txt"
+            tar -czf "dist/release/$name.tar.gz" "$name"
+            rm -rf "$name"
+          done
+          (cd dist/release && sha256sum ./*.tar.gz > checksums.txt)
+        env:
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Attach artifacts to the release
+        run: |
+          gh release upload "$TAG_NAME" dist/release/*.tar.gz dist/release/checksums.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.release-please.outputs.tag_name }}

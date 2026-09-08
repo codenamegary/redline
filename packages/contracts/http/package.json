@@ -1,7 +1,7 @@
 {
   "name": "@redline/http-contracts",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Shared Zod wire schemas for the redline server and web app.",
   "type": "module",
   "license": "MIT",
