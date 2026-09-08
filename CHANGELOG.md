@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/codenamegary/redline/compare/v0.5.0...v0.5.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **release:** package artifacts on bot-created releases ([#33](https://github.com/codenamegary/redline/issues/33)) ([bb85344](https://github.com/codenamegary/redline/commit/bb85344d84c3a15bf4b033d5500233b7d47cb8ae))
+
 ## [0.5.0](https://github.com/codenamegary/redline/compare/v0.4.1...v0.5.0) (2026-09-08)
 
 
