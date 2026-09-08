@@ -1,1 +1,52 @@
 @import "tailwindcss";
+
+@theme {
+  --color-ink: #0f1115;
+  --color-panel: #14171e;
+  --color-card: #171a21;
+  --color-edge: #262b36;
+  --color-edge-strong: #333b4d;
+  --color-hover: #4c5878;
+  --color-fog: #e6e8ee;
+  --color-mist: #9aa3b2;
+  --color-dim: #6b7487;
+  --color-redline: #e5484d;
+  --color-go: #46d68c;
+  --color-warn: #f5a524;
+  --color-link: #8ab4ff;
+
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, monospace;
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--color-ink);
+  color: var(--color-fog);
+  font: 14px/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes redline-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.presence-dot-working {
+  animation: redline-pulse 1s ease-in-out infinite;
+}
+
+@keyframes redline-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.redline-spinner {
+  animation: redline-spin 0.8s linear infinite;
+}

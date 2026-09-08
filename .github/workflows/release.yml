@@ -20,6 +20,9 @@ jobs:
 
       - run: bun run check
 
+      - name: Build web app
+        run: bun run build:web
+
       - name: Build and package binaries
         run: |
           version="${GITHUB_REF_NAME#v}"
@@ -30,9 +33,10 @@ jobs:
             bun build --compile --minify \
               --define "REDLINE_VERSION=\"$version\"" \
               --target "$target" \
-              src/main.ts --outfile "dist/$name"
+              packages/server/src/main.ts --outfile "dist/$name"
             mkdir -p "$name"
             cp "dist/$name" "$name/redline"
+            cp -r dist/web "$name/web"
             printf '%s\n' "$version" > "$name/version.txt"
             tar -czf "dist/release/$name.tar.gz" "$name"
             rm -rf "$name"
