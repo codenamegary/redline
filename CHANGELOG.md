@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/codenamegary/redline/compare/v0.4.1...v0.5.0) (2026-09-08)
+
+
+### Features
+
+* migrate frontend to React and restructure into a bun workspace monorepo ([#31](https://github.com/codenamegary/redline/issues/31)) ([d4909cd](https://github.com/codenamegary/redline/commit/d4909cd8853c18204fc25b130f2339743a409826))
+
+
+### Bug Fixes
+
+* **ui:** never block Iterate on agent attachment ([#28](https://github.com/codenamegary/redline/issues/28)) ([e8bc11e](https://github.com/codenamegary/redline/commit/e8bc11e10c2db458bb436e54ee4253cb80387f1d))
+
 ## [0.4.1](https://github.com/codenamegary/redline/compare/v0.4.0...v0.4.1) (2026-09-08)
 
 
