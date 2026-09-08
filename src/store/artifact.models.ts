@@ -102,6 +102,9 @@ export const ArtifactVersionSchema = z.object({
   publishedAt: IsoTimestampSchema.optional(),
   approvedAt: IsoTimestampSchema.optional(),
   batch: VersionBatchSchema.optional(),
+  // Static asset filenames attached to this version (generated images and
+  // the like), stored under <version>-assets/ next to the version file.
+  assets: z.array(z.string().min(1)).optional(),
 })
 
 export type ArtifactVersion = z.infer<typeof ArtifactVersionSchema>

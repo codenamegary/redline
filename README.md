@@ -147,6 +147,7 @@ Standards: Richardson Level 2, camelCase JSON, ISO 8601 UTC timestamps, RFC 7807
 | POST | `/api/v1/artifacts/:id/iterations` | hit Iterate: freezes open threads into a pending version, status `iterating` (409 unless `review`, 422 with nothing open) |
 | POST | `/api/v1/artifacts/:id/versions` | publish the pending iteration `{html, note?}` → becomes current, status `review` (409 unless `iterating`) |
 | POST | `/api/v1/artifacts/:id/versions/:version/approve` | done for now: stamps `approvedAt` on the current version (409 while iterating) |
+| POST | `/api/v1/artifacts/:id/assets` | attach a static asset `{version, filename, data}` (base64) to one version → 201 + Location. PNG/JPG/JPEG/GIF/WebP/SVG/AVIF, 5 MB max, 409 on duplicate filename |
 | GET | `/api/v1/artifacts/:id/feedback` | all threads artifact-scoped, newest first, plus `agentAttached`, `iteratedAt`, `approvedAt`, version ledger. `?version=` filters to threads pinned on that version. Long-poll `?after=<iso>&wait=<seconds>` (max 300) |
 | POST | `/api/v1/artifacts/:id/feedback` | new thread `{body, anchor?, version?, author?}` (409 while iterating) |
 | POST | `/api/v1/artifacts/:id/threads/:threadId/messages` | reply `{body, author?}`, always allowed. User replies while the agent is attached get a `thinking` placeholder |

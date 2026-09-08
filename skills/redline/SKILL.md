@@ -21,7 +21,7 @@ Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPD
 
 1. Decide the artifact's shape: architecture doc, decision record, API contract, data flow, comparison, UI mockup, explainer. One artifact = one idea. Split unrelated topics into separate artifacts.
 2. Author a complete single-file HTML document:
-   - Load Tailwind via the browser CDN and start from the base skeleton below. The Tailwind CDN script is the only external request allowed: all other CSS and JS stays inline, inline SVG for diagrams, no remote images.
+   - Load Tailwind via the browser CDN and start from the base skeleton below. The Tailwind CDN script is the only external request allowed: all other CSS and JS stays inline, inline SVG for diagrams. No remote images. Generated local images are fine (see Images & static assets).
    - Give every major section, diagram node, table, and embedded UI demo a stable `id`. Pins reference these selectors, so stable ids keep feedback attached across versions.
    - Readability first: system font stack, clear headings, generous line height, responsive down to ~1000px. Pick dark or light deliberately.
    - Interactive bits are encouraged when they explain: toggles, tabs, step-throughs, small simulations. Keep them dependency-free.
@@ -29,8 +29,8 @@ Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPD
    - For architecture: label every box and edge, add a legend, and put trade-off prose next to the diagram.
    - Start with a header: title plus a one-paragraph summary of the decision or idea.
 3. Write the document to `.redline-drafts/<short-slug>.html` in the current workspace. Use the Write tool. Do not use `mktemp`, `/tmp`, or a path outside the workspace.
-4. Read the draft. Call `create_artifact` with the file contents as `html`. Pass the string, not a path. The tool returns the review URL. Same rule for `update_artifact` when the user asked you to publish.
-5. Delete the draft file. Remove `.redline-drafts/` if it is empty. Do not commit the draft.
+4. Read the draft. Call `create_artifact` with the file contents as `html`. Pass the string, not a path. The tool returns the review URL. If the document references generated images, upload them now (see Images & static assets) before sharing the URL. Same rule for `update_artifact` when the user asked you to publish: upload assets for the pending version first, then publish.
+5. Delete the draft files. Remove `.redline-drafts/` if it is empty. Do not commit the drafts.
 6. Share the URL, say what to look at, and stop. The response text confirms this whether or not a reviewer lane is configured.
 
 ## Base skeleton (Tailwind via CDN)
@@ -77,12 +77,27 @@ These classes are a menu, not a framework. Copy only the ones you use; delete or
 |------|---------|
 | `create_artifact` | `{title, html, prompt?, note?}` returns the review URL. Share it and stop |
 | `update_artifact` | `{artifactId, html, note?}` publishes the pending iteration (409 unless iterating), status returns to review. Only on an explicit user ask |
+| `upload_artifact_asset` | `{artifactId, version, filename, contentBase64}` attaches a static image to one version (5 MB max). Upload before the HTML that references it |
 | `get_feedback` | `{artifactId, version?}` threads, presence, pending iteration, right now. Only on an explicit user ask |
 | `list_artifacts` | all artifacts with open thread counts |
 
+## Images & static assets
+
+Artifacts stay single-file HTML. Generated images ride along as per-version assets: the server stores them at `~/.redline/artifacts/<id>/<version>-assets/<filename>` and serves them at `/a/<id>/<version>/<filename>`, so a plain relative `src` inside the artifact HTML just works.
+
+If you can generate images (an image tool or model is available to you) and the artifact calls for one — photo-real mockups, rendered textures, complex illustrations — do this:
+
+1. Check that image generation is wanted: `GET /api/v1/settings` and read `imageGen`. When `enabled` is false, generate only if the user asked for images directly. `agent` and `model` say what the human configured, if anything.
+2. Generate into `.redline-drafts/` in the current workspace, same staging rules as HTML. Never `/tmp`.
+3. Upload each file to the target version — `upload_artifact_asset {artifactId, version, filename, contentBase64}`. `version` is `v1` for a fresh create, or the pending version from `get_feedback` when publishing an iteration.
+4. Reference the file with a relative path: `<img src="hero.png">`. Never absolute paths, `file://`, or remote URLs.
+5. Delete the draft after the upload succeeds.
+
+Rules: png, jpg, jpeg, gif, webp, svg, avif. 5 MB per file. One filename per version — re-uploading the same name is a 409, so pick a new name for a new image. Upload before sharing the URL or publishing the version that references the file; a missing src shows a broken image mid-review.
+
 ## Server settings
 
-Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, and Notify tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is probably `none`.
+Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, Notify, and Image Gen tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is probably `none`. The Image Gen tab is config-only: an on/off toggle plus the agent and model the human uses for image generation; redline never spawns it.
 
 Two limits worth knowing. ACP has no portable model flag, so the per-lane model only applies to the `opencode-sdk` adapter (on ACP, bake model flags into a custom command). Notify needs an `opencode-sdk` lane and an origin with `host: "opencode"` captured at create time. `GET /api/v1/artifacts/:id/worker` is debug only (configured vs live lanes, origin). Do not use it in the review loop.
 
@@ -129,6 +144,9 @@ curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/threads/<threadId>/m
 # publish the pending iteration (409 unless the user hit Iterate)
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/versions -H 'content-type: application/json' \
   -d '{"html":"...","note":"what changed"}'
+# attach a generated image to v1 (then reference it as <img src="hero.png">)
+curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts/<id>/assets -H 'content-type: application/json' \
+  -d '{"version":"v1","filename":"hero.png","data":"'"$(base64 -w0 .redline-drafts/hero.png)"'"}'
 # check the server-side lanes and prompt templates
 curl -s http://127.0.0.1:4739/api/v1/settings
 ```
@@ -141,4 +159,4 @@ Each thread has `id`, `status` (`open` or `resolved`), `anchor` (`selector`, `te
 
 Threads belong to the artifact, not to a version. The default feedback view always returns every thread, newest first, including threads pinned on older versions. Resolved threads stay readable (collapsed in the review UI, tagged with the version that resolved them). `?version=vN` filters to threads pinned on vN. The user resolves threads, never you.
 
-The view also carries `current`, `artifactStatus` (`draft`, `review`, `iterating`), `agentAttached` (true when a reviewer lane is bound, a worker lane is running, or a feedback long-poll is in flight), plus additive per-lane booleans `reviewerAttached` and `workerRunning`, `iteratedAt`, `approvedAt` (when the current version is signed off), and the version ledger — one row per iteration: `version`, `note`, `publishedAt`, `approvedAt`, and `batch` (`threadIds`, `submittedAt`) while it is the frozen work contract. A row with a batch and no `publishedAt` is the pending iteration.
+The view also carries `current`, `artifactStatus` (`draft`, `review`, `iterating`), `agentAttached` (true when a reviewer lane is bound, a worker lane is running, or a feedback long-poll is in flight), plus additive per-lane booleans `reviewerAttached` and `workerRunning`, `iteratedAt`, `approvedAt` (when the current version is signed off), and the version ledger — one row per iteration: `version`, `note`, `publishedAt`, `approvedAt`, `assets` (uploaded image filenames, when the version has any), and `batch` (`threadIds`, `submittedAt`) while it is the frozen work contract. A row with a batch and no `publishedAt` is the pending iteration.

@@ -42,6 +42,14 @@ const SummarySchema = z.object({
 
 type Summary = z.infer<typeof SummarySchema>
 
+const AssetSchema = z.object({
+  artifactId: z.string(),
+  version: z.string(),
+  filename: z.string(),
+  size: z.number(),
+  url: z.string(),
+})
+
 const ThreadSchema = z.object({
   id: z.string(),
   status: z.string(),
@@ -321,6 +329,48 @@ export default function (pi: ExtensionAPI): void {
         content: [{ type: "text", text: buildUpdateResponseText(asResponseSummary(summary)) }],
         details: summary,
       }
+    },
+  })
+
+  pi.registerTool({
+    name: "upload_artifact_asset",
+    label: "Upload artifact asset",
+    description:
+      "Attach a static asset (PNG, JPG, JPEG, GIF, WebP, SVG, AVIF; 5 MB max decoded) to one version of a redline artifact. Upload before publishing the HTML that references the file, then reference it with a relative path (src=\"hero.png\"); it is served at /a/<artifactId>/<version>/<filename>.",
+    promptSnippet: "Attach a generated static image to a redline artifact version",
+    parameters: Type.Object({
+      artifactId: Type.String({ description: "Artifact id from create_artifact" }),
+      version: Type.String({ description: "Target version (v1, v2, ...)" }),
+      filename: Type.String({
+        description: "Asset filename, e.g. hero.png. Letters, digits, dot, dash, underscore only.",
+      }),
+      contentBase64: Type.String({ description: "Base64-encoded asset bytes (5 MB max decoded)" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+      const base = await ensureDaemon()
+      const body = await requestJson(
+        base,
+        "/api/v1/artifacts/" + encodeURIComponent(params.artifactId) + "/assets",
+        jsonInit("POST", {
+          version: params.version,
+          filename: params.filename,
+          data: params.contentBase64,
+        }),
+      )
+      const asset = AssetSchema.parse(body)
+      const text =
+        "Uploaded " +
+        asset.filename +
+        " (" +
+        String(asset.size) +
+        " bytes) to " +
+        asset.artifactId +
+        " " +
+        asset.version +
+        " — reference it as src=\"" +
+        asset.filename +
+        "\""
+      return { content: [{ type: "text", text: text }], details: asset }
     },
   })
 

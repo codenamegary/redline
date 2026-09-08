@@ -162,6 +162,17 @@ const clientScript = `(function () {
     })
     document.getElementById("notify-origin").value = settings.notifyOrigin ? "true" : "false"
     document.getElementById("server-url").value = settings.opencodeServerUrl
+    var imageGen = settings.imageGen || { enabled: false, agent: "", model: "" }
+    document.getElementById("imagegen-enabled").checked = imageGen.enabled === true
+    document.getElementById("imagegen-agent").value = imageGen.agent
+    document.getElementById("imagegen-model").value = imageGen.model
+    updateImageGenUi()
+  }
+
+  function updateImageGenUi() {
+    var enabled = document.getElementById("imagegen-enabled").checked
+    document.getElementById("imagegen-agent").disabled = !enabled
+    document.getElementById("imagegen-model").disabled = !enabled
   }
 
   function lanePayload(lane) {
@@ -177,6 +188,11 @@ const clientScript = `(function () {
     return {
       reviewer: lanePayload("reviewer"),
       worker: lanePayload("worker"),
+      imageGen: {
+        enabled: document.getElementById("imagegen-enabled").checked,
+        agent: document.getElementById("imagegen-agent").value.trim(),
+        model: document.getElementById("imagegen-model").value.trim()
+      },
       notifyOrigin: document.getElementById("notify-origin").value === "true",
       opencodeServerUrl: document.getElementById("server-url").value.trim(),
       prompts: {
@@ -234,6 +250,8 @@ const clientScript = `(function () {
     })
   })
 
+  document.getElementById("imagegen-enabled").addEventListener("change", updateImageGenUi)
+
   document.getElementById("save").addEventListener("click", function () {
     api("/settings", jsonMethod("PUT", savePayload()))
       .then(function () { toast("Saved", true) })
@@ -264,7 +282,10 @@ const settingsStyle = `
   section[role=tabpanel] h2 { margin: 0 0 14px; font-size: 15px }
   .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px }
   label { color: #9aa3b2; font-size: 12px }
+  .checkline { display: flex; align-items: center; gap: 8px; color: #e6e8ee; font-size: 13px; cursor: pointer }
+  .checkline input { width: 16px; height: 16px; accent-color: #e5484d; cursor: pointer }
   select, input[type=text], textarea { background: #0f1115; color: #e6e8ee; border: 1px solid #333b4d; border-radius: 6px; padding: 7px 9px; font: inherit; max-width: 100% }
+  select:disabled, input[type=text]:disabled { opacity: 0.45 }
   textarea { resize: vertical; font-family: ui-monospace, monospace; font-size: 13px }
   select:focus-visible, input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px }
   ::placeholder { color: #6b7487 }
@@ -299,6 +320,7 @@ export const renderSettingsPage = (): string =>
     <button type="button" role="tab" id="tab-reviewer" aria-controls="pane-reviewer" aria-selected="true">Reviewer</button>
     <button type="button" role="tab" id="tab-worker" aria-controls="pane-worker" aria-selected="false" tabindex="-1">Worker</button>
     <button type="button" role="tab" id="tab-notify" aria-controls="pane-notify" aria-selected="false" tabindex="-1">Notify</button>
+    <button type="button" role="tab" id="tab-imagegen" aria-controls="pane-imagegen" aria-selected="false" tabindex="-1">Image Gen</button>
   </nav>
   ${lanePane("reviewer", true)}
   ${lanePane("worker", false)}
@@ -316,6 +338,24 @@ export const renderSettingsPage = (): string =>
       <input type="text" id="server-url" value="http://127.0.0.1:4096" spellcheck="false" autocomplete="off">
       <p class="hint">Only used when create stored an origin and the lane adapter can notify.</p>
     </div>
+  </section>
+  <section id="pane-imagegen" role="tabpanel" aria-labelledby="tab-imagegen" hidden>
+    <h2>Image generation</h2>
+    <div class="field">
+      <label class="checkline" for="imagegen-enabled">
+        <input type="checkbox" id="imagegen-enabled">
+        <span>Enabled &mdash; agents with image tools may generate static images and attach them to artifact versions</span>
+      </label>
+    </div>
+    <div class="field">
+      <label for="imagegen-agent">Agent</label>
+      <input type="text" id="imagegen-agent" placeholder="the image agent or command you use" spellcheck="false" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="imagegen-model">Model</label>
+      <input type="text" id="imagegen-model" placeholder="e.g. gpt-image-1" spellcheck="false" autocomplete="off">
+    </div>
+    <p class="hint">Optional and config-only: redline never spawns this agent. The setting tells capable agents that image generation is wanted and which agent/model to prefer when attaching images to artifact versions.</p>
   </section>
   <div class="savebar">
     <button type="button" id="save" class="primary">Save</button>

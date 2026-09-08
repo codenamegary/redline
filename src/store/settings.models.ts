@@ -21,9 +21,28 @@ export const LaneConfigSchema = z.object({
 
 export type LaneConfig = z.infer<typeof LaneConfigSchema>
 
+// Optional image-generation setup. Config only: redline never spawns this
+// agent — it records what the human wired up so capable agents know image
+// generation is wanted and which model to prefer when attaching assets.
+export const ImageGenConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  agent: z.string().default(""),
+  model: z.string().default(""),
+})
+
+export type ImageGenConfig = z.infer<typeof ImageGenConfigSchema>
+
+// imageGen arrives empty from pre-existing settings files; preprocess fills
+// the object so schema defaults apply instead of failing the whole parse.
+export const imageGenField = z.preprocess(
+  (value) => (value === undefined || value === null ? {} : value),
+  ImageGenConfigSchema,
+)
+
 export const RedlineSettingsSchema = z.object({
   reviewer: LaneConfigSchema,
   worker: LaneConfigSchema,
+  imageGen: imageGenField,
   notifyOrigin: z.boolean().default(true),
   opencodeServerUrl: z.url().default("http://127.0.0.1:4096"),
   prompts: z.object({

@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
 import { hasErrorCode } from "./errors"
 import {
+  ImageGenConfigSchema,
   LaneConfig,
   LaneConfigSchema,
   RedlineSettings,
@@ -24,6 +25,7 @@ export const defaultSettings = (): RedlineSettings => {
   return RedlineSettingsSchema.parse({
     reviewer: lane(),
     worker: lane(),
+    imageGen: ImageGenConfigSchema.parse({}),
     prompts: { reviewer: DEFAULT_REVIEWER_PROMPT, worker: DEFAULT_WORKER_PROMPT },
   })
 }
