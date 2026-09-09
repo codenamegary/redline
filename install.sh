@@ -224,6 +224,8 @@ download_release() {
   tar -xzf "$tmp/redline-$version-$platform.tar.gz" -C "$tmp"
   mkdir -p "$BIN_DIR"
   mv "$tmp/redline-$version-$platform/redline" "$BIN_PATH"
+  rm -rf "$BIN_DIR/web"
+  cp -r "$tmp/redline-$version-$platform/web" "$BIN_DIR/web"
   printf '%s\n' "$version" > "$VERSION_FILE"
   rm -rf "$tmp"
 }
