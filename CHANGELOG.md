@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.3](https://github.com/codenamegary/redline/compare/v0.5.2...v0.5.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **skill:** bootstrap from the remote installer, not a repo clone ([#38](https://github.com/codenamegary/redline/issues/38)) ([51a17fb](https://github.com/codenamegary/redline/commit/51a17fb3371ff6ecf51be0a50fc98999709c93a9))
+
 ## [0.5.2](https://github.com/codenamegary/redline/compare/v0.5.1...v0.5.2) (2026-09-09)
 
 
