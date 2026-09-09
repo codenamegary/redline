@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.4](https://github.com/codenamegary/redline/compare/v0.5.3...v0.5.4) (2026-09-09)
+
+
+### Bug Fixes
+
+* **installer:** install the web UI next to the binary ([#40](https://github.com/codenamegary/redline/issues/40)) ([afa6b89](https://github.com/codenamegary/redline/commit/afa6b893b751fa8efc0e31121cf466a9f9f23542))
+
 ## [0.5.3](https://github.com/codenamegary/redline/compare/v0.5.2...v0.5.3) (2026-09-09)
 
 
