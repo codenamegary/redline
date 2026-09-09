@@ -169,16 +169,16 @@ verify_checksums() {
   (
     cd "$dir" || return 1
     if ! have sha256sum && ! have shasum; then
-      warn "no sha256 tool found; skipping checksum verification"
-      return 0
+      echo "no sha256 tool found (need sha256sum or shasum)" >&2
+      return 1
     fi
     local expected actual
     # checksums.txt lists every release tarball; verify the one we downloaded.
     # Entries may be "name" or "./name" depending on how they were generated.
     expected="$(awk -v t="$tarball" '$2 == t || $2 == "./" t { print $1; exit }' checksums.txt 2>/dev/null)"
     if [ -z "$expected" ]; then
-      warn "checksums.txt has no entry for $tarball; skipping checksum verification"
-      return 0
+      echo "checksums.txt has no entry for $tarball" >&2
+      return 1
     fi
     if have sha256sum; then
       actual="$(sha256sum "$tarball" | awk '{print $1}')"
@@ -210,11 +210,9 @@ download_release() {
   say "downloading redline v$version ($platform)"
   curl -fsSL "$RELEASE_BASE/download/v$version/redline-$version-$platform.tar.gz" -o "$tmp/redline-$version-$platform.tar.gz" \
     || die "could not download redline v$version for $platform from $RELEASE_BASE"
-  if curl -fsSL "$RELEASE_BASE/download/v$version/checksums.txt" -o "$tmp/checksums.txt" 2>/dev/null; then
-    verify_checksums "$tmp" "redline-$version-$platform.tar.gz" || die "checksum verification failed for redline v$version"
-  else
-    warn "could not download checksums.txt; skipping checksum verification"
-  fi
+  curl -fsSL "$RELEASE_BASE/download/v$version/checksums.txt" -o "$tmp/checksums.txt" \
+    || die "could not download checksums.txt for redline v$version"
+  verify_checksums "$tmp" "redline-$version-$platform.tar.gz" || die "checksum verification failed for redline v$version"
   tar -xzf "$tmp/redline-$version-$platform.tar.gz" -C "$tmp"
   mkdir -p "$BIN_DIR"
   mv "$tmp/redline-$version-$platform/redline" "$BIN_PATH"
