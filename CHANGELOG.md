@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/codenamegary/redline/compare/v0.5.1...v0.5.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **installer:** verify only the downloaded tarball against checksums.txt ([#36](https://github.com/codenamegary/redline/issues/36)) ([5fa5a14](https://github.com/codenamegary/redline/commit/5fa5a1495ce5dd47118be31222e03a10c84a9c40))
+
 ## [0.5.1](https://github.com/codenamegary/redline/compare/v0.5.0...v0.5.1) (2026-09-08)
 
 

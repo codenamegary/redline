@@ -1,7 +1,7 @@
 {
   "name": "redline-monorepo",
   "private": true,
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Local review server for AI-generated design artifacts. The agent renders, the human redlines.",
   "type": "module",
   "license": "MIT",
