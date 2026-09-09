@@ -224,12 +224,8 @@ download_release() {
   tar -xzf "$tmp/redline-$version-$platform.tar.gz" -C "$tmp"
   mkdir -p "$BIN_DIR"
   mv "$tmp/redline-$version-$platform/redline" "$BIN_PATH"
-  if [ -d "$tmp/redline-$version-$platform/web" ]; then
-    rm -rf "$BIN_DIR/web"
-    cp -r "$tmp/redline-$version-$platform/web" "$BIN_DIR/web"
-  else
-    warn "release tarball has no web/ directory; the API will work but the UI will not be served"
-  fi
+  rm -rf "$BIN_DIR/web"
+  cp -r "$tmp/redline-$version-$platform/web" "$BIN_DIR/web"
   printf '%s\n' "$version" > "$VERSION_FILE"
   rm -rf "$tmp"
 }
