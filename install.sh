@@ -44,7 +44,15 @@ VERSION_FILE="$BIN_DIR/VERSION"
 
 # ---------- locate the app directory / pick the mode ----------
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+# Resolve the script's on-disk location, or empty when piped via
+# curl|bash — a piped installer must never mistake the caller's cwd for a
+# source checkout.
+SELF_PATH="${BASH_SOURCE[0]:-$0}"
+if [ -f "$SELF_PATH" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SELF_PATH")" 2>/dev/null && pwd || true)"
+else
+  SCRIPT_DIR=""
+fi
 
 MODE="install"
 FROM_SOURCE=0
@@ -68,7 +76,7 @@ done
 if [ -n "${REDLINE_APP:-}" ]; then
   APP_DIR="$REDLINE_APP"
   FROM_SOURCE=1
-elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$REDLINE_HOME/app" ] && [ -f "$SCRIPT_DIR/packages/server/src/main.ts" ]; then
+elif [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$REDLINE_HOME/app" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -f "$SCRIPT_DIR/packages/server/src/main.ts" ]; then
   APP_DIR="$SCRIPT_DIR"
   FROM_SOURCE=1
 else
@@ -403,6 +411,28 @@ EOF
 }
 
 # ---------- main ----------
+
+# Self-heal a stale clone copy of this installer: pull the app checkout and,
+# when this very file was updated by the pull, re-exec the fresh copy. Never
+# fires for curl|bash invocations ($0 is the shell, not a file).
+maybe_self_update() {
+  [ -d "$APP_DIR/.git" ] || return 0
+  local script="$APP_DIR/install.sh"
+  [ -f "$script" ] || return 0
+  [ "$script" -ef "$0" ] || return 0
+  local before after
+  before="$(app_head)"
+  refresh_app
+  after="$(app_head)"
+  if [ "$before" != "$after" ] && [ -f "$script" ]; then
+    say "installer updated — re-running"
+    exec bash "$script" "$@"
+  fi
+}
+
+if [ "$MODE" = "ensure-daemon" ] || [ "$MODE" = "update" ]; then
+  maybe_self_update
+fi
 
 if [ "$FROM_SOURCE" -eq 1 ]; then
   [ -f "$APP_DIR/packages/server/src/main.ts" ] || die "no redline app at $APP_DIR (set REDLINE_APP or run install.sh from a checkout)"
