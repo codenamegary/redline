@@ -105,21 +105,25 @@ Two limits worth knowing. ACP has no portable model flag, so the per-lane model 
 
 pi and OpenCode tools start the daemon on first call. Without those tools (Claude Code, Cursor, Antigravity, skill-only installs), bootstrap yourself. No human needed:
 
-1. Prefer the canonical app at `~/.redline/app`. A skills-CLI install usually only has this skill folder, not `install.sh` or `src/`. Clone if missing:
+1. Ensure a running daemon (idempotent, safe to re-run). Fetch the installer straight from main — no repo clone, no local copy to go stale:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.sh | bash -s -- --ensure-daemon
+   ```
+
+   Downloads the prebuilt release binary into `~/.redline/bin` when needed (only curl + tar + a sha256 tool required — no bun, node, or deps), starts or restarts the daemon after an update, and waits for health. Logs: `~/.redline/server.log`.
+
+2. Only these flows need a repo checkout at `~/.redline/app` (clone or set `REDLINE_APP` to an existing one):
 
    ```bash
    [ -f ~/.redline/app/install.sh ] || git clone --depth 1 https://github.com/codenamegary/redline.git ~/.redline/app
    ```
 
-   If you are inside a full checkout (it contains `install.sh` and `src/main.ts`), you may use that directory instead and set `REDLINE_APP` to it.
+   - `--from-source` runs the daemon from the checkout instead of the binary (needs bun or node 22+).
+   - `--with-pi` / `--with-opencode` wire the extension and plugin, which live in the repo.
+   - In source mode, `--ensure-daemon` pulls the checkout to latest before starting.
 
-2. Ensure a running daemon (idempotent, safe to re-run). Also updates to the latest release when one exists:
-
-   ```bash
-   bash ~/.redline/app/install.sh --ensure-daemon
-   ```
-
-   Downloads the prebuilt release binary into `~/.redline/bin` when needed (only curl + tar required — no bun, node, or deps), starts or restarts the daemon after an update, and waits for health. Logs: `~/.redline/server.log`. `--from-source` runs the daemon from the checkout instead (needs bun or node 22+).
+   If you are inside a full checkout (it contains `install.sh` and `packages/server/src/main.ts`), you may use that directory instead and set `REDLINE_APP` to it.
 
 Skill text updates come from the skills CLI (`npx skills update`). Do not ask the user to run update commands.
 
