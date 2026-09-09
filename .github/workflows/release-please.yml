@@ -63,7 +63,7 @@ jobs:
             tar -czf "dist/release/$name.tar.gz" "$name"
             rm -rf "$name"
           done
-          (cd dist/release && sha256sum ./*.tar.gz > checksums.txt)
+          (cd dist/release && sha256sum redline-*.tar.gz > checksums.txt)
         env:
           TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
 
