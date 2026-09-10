@@ -13,7 +13,12 @@ export const getFeedbackRoute = (ctx: RoutesContext): RouteDescriptor => ({
     const waits = query.wait ?? 0
     if (waits <= 0) {
       const view = await readFeedbackView(ctx.store, id, query.version)
-      return { ...view, agentAttached: ctx.isAgentAttached(id), ...ctx.lanePresence(id) }
+      return {
+        ...view,
+        agentAttached: ctx.isAgentAttached(id),
+        ...ctx.lanePresence(id),
+        workerLive: await ctx.workerLive(id),
+      }
     }
     const deadline = Date.now() + waits * 1000
     ctx.beginWaitingAgent(id)
@@ -26,7 +31,14 @@ export const getFeedbackRoute = (ctx: RoutesContext): RouteDescriptor => ({
         const view = await readFeedbackView(ctx.store, id, query.version)
         const changed =
           query.after !== undefined && (view.updatedAt > query.after || view.iteratedAt > query.after)
-        if (changed || Date.now() >= deadline) return { ...view, agentAttached: true, ...ctx.lanePresence(id) }
+        if (changed || Date.now() >= deadline) {
+          return {
+            ...view,
+            agentAttached: true,
+            ...ctx.lanePresence(id),
+            workerLive: await ctx.workerLive(id),
+          }
+        }
         await sleep(500)
       }
     } finally {

@@ -8,7 +8,7 @@ import { z } from "zod"
 import { FastifyInstance } from "fastify"
 
 import { buildServer } from "../server"
-import { openStore, readArtifactMeta } from "../store/artifact.store"
+import { openStore, readArtifactMeta, startIteration } from "../store/artifact.store"
 import { workerRuntime } from "../worker/dispatcher"
 import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
 import {
@@ -79,6 +79,7 @@ const ViewSchema = z.object({
   agentAttached: z.boolean().optional(),
   reviewerAttached: z.boolean().optional(),
   workerRunning: z.boolean().optional(),
+  workerLive: z.boolean().optional(),
   approvedAt: z.string().optional(),
   versions: z.array(
     z.object({
@@ -798,6 +799,11 @@ describe("agent lane dispatch", () => {
     notifyOrigin: async (origin: OriginRef, text: string) => {
       recorded.notes.push({ origin: origin, text: text })
     },
+    interrupt: () => {
+      const gate = pending[pending.length - 1]
+      gate?.reject(new Error("interrupted"))
+    },
+    sessionLog: async () => "fake session log",
   }
 
   beforeAll(async () => {
@@ -1175,7 +1181,7 @@ describe("agent lane dispatch", () => {
     expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
   })
 
-  it("reports a worker failure back on the batch thread", async () => {
+  it("rolls a failed worker round back to review with threads intact", async () => {
     const created = await createLaneArtifact("Lane worker fail", "<p>lane-n v1</p>")
     await waitForBound(created.id)
 
@@ -1190,8 +1196,129 @@ describe("agent lane dispatch", () => {
     await waitFor(async () => {
       const view = await laneView(created.id)
       const messages = view.threads[0]?.messages ?? []
-      return messages[messages.length - 1]?.body === "Worker failed: boom"
+      return (
+        messages[messages.length - 1]?.body ===
+        "Iteration failed: boom — threads stay open; Iterate again when ready."
+      )
     })
+    const view = await laneView(created.id)
+    expect(view.artifactStatus).toBe("review")
+    expect(view.versions.some((version: { batch?: unknown; publishedAt?: unknown }) => version.batch !== undefined && version.publishedAt === undefined)).toBe(false)
+    expect(view.threads.every((thread: { status: string }) => thread.status === "open")).toBe(true)
+  })
+
+  it("stamps the live worker session and serves its log while iterating", async () => {
+    const created = await createLaneArtifact("Lane log", "<p>lane-o v1</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "make it better")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane log")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane log")
+
+    const logResponse = await laneApp.inject({
+      method: "GET",
+      url: "/api/v1/artifacts/" + created.id + "/iterations/current/log",
+    })
+    expect(logResponse.statusCode).toBe(200)
+    expect(logResponse.json()).toMatchObject({
+      running: true,
+      adapterId: "acp",
+      sessionId: "fake-1",
+      log: "fake session log",
+    })
+    const view = await laneView(created.id)
+    expect(view.workerLive).toBe(true)
+
+    resolveDuty(await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane log"))
+    await waitFor(async () => (await laneView(created.id)).current === "v2")
+    const ended = await laneApp.inject({
+      method: "GET",
+      url: "/api/v1/artifacts/" + created.id + "/iterations/current/log",
+    })
+    expect(ended.json()).toMatchObject({ running: false, log: "" })
+  })
+
+  it("stops a running round: rollback, interrupt, threads intact", async () => {
+    const created = await createLaneArtifact("Lane stop", "<p>lane-p v1</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "stop me")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane stop")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane stop")
+
+    const stopped = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations/current/stop",
+      payload: {},
+    })
+    expect(stopped.statusCode).toBe(200)
+    expect(stopped.json()).toMatchObject({ status: "review", current: "v1", stoppedVersion: "v2" })
+
+    const view = await laneView(created.id)
+    expect(view.artifactStatus).toBe("review")
+    expect(view.versions).toHaveLength(1)
+    expect(
+      view.threads[0]?.messages.some(
+        (message: { body: string }) => message.body === "Iteration stopped — threads stay open.",
+      ),
+    ).toBe(true)
+
+    // The interrupted duty settles through the error path with nothing left
+    // to heal, and the lane returns to idle.
+    await waitFor(() => workerRuntime.current?.presence(created.id).workerRunning === false)
+    expect((await laneView(created.id)).artifactStatus).toBe("review")
+
+    // A fresh iterate works and reuses the version number.
+    const dutiesBefore = recorded.duties.length
+    await iterate(created.id)
+    const secondIndex = await waitForDuty(
+      (duty) => duty.lane === "worker" && recorded.duties.indexOf(duty) >= dutiesBefore,
+    )
+    resolveDuty(secondIndex)
+    await waitFor(async () => (await laneView(created.id)).current === "v2")
+    expect(workIndex).toBeGreaterThanOrEqual(0)
+  })
+
+  it("stops an orphaned round left iterating without a duty", async () => {
+    const created = await createLaneArtifact("Lane orphan", "<p>lane-q v1</p>")
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "orphan me")
+    // Simulate a server restart mid-round: iterate in the store with no
+    // dispatch, so nothing is running while the status says iterating.
+    await startIteration(laneStore, created.id)
+
+    const stopped = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations/current/stop",
+      payload: {},
+    })
+    expect(stopped.statusCode).toBe(200)
+    expect(stopped.json()).toMatchObject({ status: "review", stoppedVersion: "v2" })
+    const view = await laneView(created.id)
+    expect(view.versions).toHaveLength(1)
+    expect(
+      view.threads[0]?.messages.some(
+        (message: { body: string }) =>
+          message.body === "Iteration stopped (worker was not running) — threads stay open.",
+      ),
+    ).toBe(true)
+  })
+
+  it("rejects stopping an artifact that is not iterating", async () => {
+    const created = await createLaneArtifact("Lane stop conflict", "<p>lane-r</p>")
+    const stopped = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations/current/stop",
+      payload: {},
+    })
+    expect(stopped.statusCode).toBe(409)
   })
 
   it("reports the worker debug view for configured lanes", async () => {

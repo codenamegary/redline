@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { AcpAdapter, createAcpAdapter, defaultTimeoutSeconds } from "./acp.adapter"
+import { AcpAdapter, createAcpAdapter } from "./acp.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "./prompts"
 import { Thread } from "@redline/http-contracts/artifact.models"
 import { LaneConfig } from "@redline/http-contracts/settings.models"
@@ -78,10 +78,7 @@ const laneConfig = (argv: string[]): LaneConfig => ({
   model: "",
 })
 
-const makeAdapter = (
-  commands: { reviewer?: string[]; worker?: string[] },
-  timeoutSeconds?: number,
-): AcpAdapter =>
+const makeAdapter = (commands: { reviewer?: string[]; worker?: string[] }): AcpAdapter =>
   createAcpAdapter({
     getLaneConfig: async (lane) =>
       laneConfig(
@@ -89,7 +86,6 @@ const makeAdapter = (
           ? (commands.reviewer ?? [])
           : (commands.worker ?? commands.reviewer ?? []),
       ),
-    timeoutSeconds,
   })
 
 const iso = "2026-01-01T00:00:00.000Z"
@@ -128,12 +124,6 @@ const workerInput = (overrides?: Partial<DutyInput>): DutyInput => ({
 })
 
 describe("acp adapter", () => {
-  it("defaults the duty timeout to 15 minutes", () => {
-    // Workers can legitimately run for many minutes on a big iteration;
-    // the old 300s default kept failing long duties (#23).
-    expect(defaultTimeoutSeconds).toBe(900)
-  })
-
   it("runs a reviewer duty end to end against the fixture agent", async () => {
     const workspace = makeWorkspace()
     const { argv } = fixtureCommand(workspace)
@@ -194,16 +184,39 @@ describe("acp adapter", () => {
     await waitFor(() => !isAlive(pid))
   })
 
-  it("times a hung duty out, kills the agent, and drops the session", async () => {
+  it("interrupt kills the agent, fails the duty, and drops the session", async () => {
     const workspace = makeWorkspace()
     const { argv, pidFile } = fixtureCommand(workspace, ["--silent-prompt"])
-    const adapter = makeAdapter({ reviewer: argv }, 1)
+    const adapter = makeAdapter({ reviewer: argv })
     const session = await adapter.ensureSession("reviewer", "a1")
     const pid = await pidFrom(pidFile)
 
-    await rejectsWith(adapter.runDuty(session, reviewerInput()), "duty timed out after 1s")
+    // No duty timeout: the hung duty stays in flight until interrupted.
+    const duty = adapter.runDuty(session, reviewerInput())
+    await sleep(100)
+    void adapter.interrupt?.(session)
+    await rejectsWith(duty, "acp agent killed by signal SIGTERM")
     await waitFor(() => !isAlive(pid))
     await rejectsWith(adapter.runDuty(session, reviewerInput()), "acp session is gone")
+  })
+
+  it("sessionLog returns the agent transcript, empty for unknown sessions", async () => {
+    const workspace = makeWorkspace()
+    const { argv } = fixtureCommand(workspace, ["--tool-call"])
+    const adapter = makeAdapter({ worker: argv })
+    const session = await adapter.ensureSession("worker", "a1", {
+      html: "<html><body>v1</body></html>",
+      version: "v1",
+    })
+
+    await adapter.runDuty(session, workerInput())
+    const log = (await adapter.sessionLog?.(session)) ?? ""
+    expect(log).toContain("[tool] Read file")
+    expect(log).toContain("Checking the layout first.")
+    expect(log).toContain("[done] Read file")
+    expect(log).toContain("fake v-next")
+    expect((await adapter.sessionLog?.({ artifactId: "a1", lane: "worker", hostSessionId: "acp-gone" })) ?? "").toBe("")
+    await adapter.discard(session)
   })
 
   it("opens the session in the artifact's project cwd", async () => {

@@ -1,6 +1,6 @@
 // Fixture ACP agent for tests: speaks just enough JSON-RPC over stdio to
 // initialize, open a session, and stream one prompt turn. Not shipped.
-// Usage: bun fake-acp-agent.ts [--pid-file <path>] [--cwd-file <path>] [--silent-init] [--silent-prompt]
+// Usage: bun fake-acp-agent.ts [--pid-file <path>] [--cwd-file <path>] [--silent-init] [--silent-prompt] [--tool-call]
 
 type UnknownRecord = Record<string, unknown>
 
@@ -16,6 +16,7 @@ const pidFile = flagValue("--pid-file")
 const cwdFile = flagValue("--cwd-file")
 const silentInit = args.includes("--silent-init")
 const silentPrompt = args.includes("--silent-prompt")
+const toolCall = args.includes("--tool-call")
 
 if (pidFile !== undefined) await Bun.write(pidFile, String(process.pid))
 
@@ -80,6 +81,18 @@ const handle = async (line: string): Promise<void> => {
       .map((block) => (isRecord(block) && typeof block.text === "string" ? block.text : ""))
       .join("\n")
     const payload = prompt.includes("Reply duty") ? repliesFrom(prompt) : buildDocument(noteFor(prompt))
+    if (toolCall) {
+      const emit = (update: Record<string, unknown>): void => {
+        send({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: { sessionId: params.sessionId, update: update },
+        })
+      }
+      emit({ sessionUpdate: "tool_call", title: "Read file" })
+      emit({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Checking the layout first." } })
+      emit({ sessionUpdate: "tool_call_update", title: "Read file", status: "completed" })
+    }
     // Two chunks prove the client accumulates across messages.
     const half = Math.ceil(payload.length / 2)
     for (const text of [payload.slice(0, half), payload.slice(half)]) {

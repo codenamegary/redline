@@ -11,9 +11,11 @@ import {
   readArtifactMeta,
   readFeedbackView,
   replaceThinkingMessage,
+  rollbackIteration,
   Store,
+  touchIteration,
 } from "../store/artifact.store"
-import { ArtifactMeta, ArtifactVersion, Thread } from "@redline/http-contracts/artifact.models"
+import { ArtifactMeta, ArtifactVersion, isPendingVersion, Thread } from "@redline/http-contracts/artifact.models"
 import { ArtifactSummary } from "@redline/http-contracts/artifact.schemas"
 import { readEffectiveSettings } from "../store/settings.store"
 import { createAcpAdapter } from "../worker/acp.adapter"
@@ -41,6 +43,10 @@ export type RoutesContext = {
   probeAcp: AcpProbe
   isAgentAttached: (id: string) => boolean
   lanePresence: (id: string) => { reviewerAttached: boolean; workerRunning: boolean }
+  // True while an iteration duty is in flight with a fresh heartbeat. While
+  // status=iterating and this is false, the round is orphaned or wedged and
+  // the user should be offered Stop.
+  workerLive: (id: string) => Promise<boolean>
   reviewerConfigured: () => Promise<boolean>
   artifactApiUrl: (origin: string, id: string) => string
   summarizeArtifact: (origin: string, meta: ArtifactMeta) => Promise<ArtifactSummary>
@@ -84,6 +90,19 @@ const lanePresence = (id: string): { reviewerAttached: boolean; workerRunning: b
     reviewerAttached: presence?.reviewerBound === true,
     workerRunning: presence?.workerRunning === true,
   }
+}
+
+// A duty counts as live when it is in flight in this process and its
+// heartbeat is fresh (or its first stamp has not landed yet — handshakes
+// precede it). A stale heartbeat with a running duty reads as wedged.
+const heartbeatStaleMs = 90_000
+
+const workerLive = async (store: Store, id: string): Promise<boolean> => {
+  if (workerRuntime.current?.presence(id).workerRunning !== true) return false
+  const meta = await readArtifactMeta(store, id).catch(() => undefined)
+  const heartbeatAt = meta?.versions.find(isPendingVersion)?.batch?.heartbeatAt
+  if (heartbeatAt === undefined) return true
+  return Date.now() - Date.parse(heartbeatAt) <= heartbeatStaleMs
 }
 
 const artifactApiUrl = (origin: string, id: string): string => origin + "/api/v1/artifacts/" + id
@@ -166,8 +185,9 @@ const tryPatchTarget = async (
 
 // Worker progress notes: appended as agent messages on the batch threads
 // that are still open. Per-thread failures are swallowed (the thread may
-// vanish mid-duty), and resolved threads stay quiet.
-const postThreadNotes = async (
+// vanish mid-duty), and resolved threads stay quiet. Also used by the stop
+// route to mark an abandoned round.
+export const postThreadNotes = async (
   store: Store,
   artifactId: string,
   threadIds: string[],
@@ -301,14 +321,20 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
     }
     return
   }
-  // Worker errors mutate nothing: the artifact stays iterating so the user
-  // can re-Iterate or the fallback agent can publish. The batch threads do
-  // hear about it, so no "working on it" note dangles.
+  // Worker errors self-heal: roll the pending iteration back so the
+  // artifact returns to review with every thread still open, ready for a
+  // fresh Iterate. A duty that lands after this (slow host, race with
+  // Stop) is dropped by handleDocument's status check.
   const meta = await readArtifactMeta(store, artifactId).catch(() => undefined)
-  const pending = meta?.versions.find((row) => row.batch !== undefined && row.publishedAt === undefined)
-  if (pending !== undefined) {
-    await postThreadNotes(store, artifactId, pending.batch?.threadIds ?? [], "Worker failed: " + detail)
-  }
+  const pending = meta !== undefined && meta.status === "iterating" ? meta.versions.find(isPendingVersion) : undefined
+  if (meta === undefined || pending === undefined) return
+  await rollbackIteration(store, artifactId)
+  await postThreadNotes(
+    store,
+    artifactId,
+    pending.batch?.threadIds ?? [],
+    "Iteration failed: " + detail + " — threads stay open; Iterate again when ready.",
+  )
   await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
 }
 
@@ -413,6 +439,7 @@ export const installDispatcher = (store: Store, seams?: RoutesSeams): void => {
       onReplies: (artifactId, result) => handleReplies(store, artifactId, result.items),
       onDocument: (artifactId, doc) => handleDocument(store, artifactId, doc),
       onError: (artifactId, lane, detail) => handleError(store, artifactId, lane, detail),
+      onWorkerHeartbeat: (artifactId, session) => touchIteration(store, artifactId, session),
     },
   })
 }
@@ -424,6 +451,7 @@ export const createRoutesContext = (store: Store, seams?: RoutesSeams): RoutesCo
     probeAcp: seams?.probeAcp ?? probeAcpHandshake,
     isAgentAttached: (id) => isAgentAttached(store, id),
     lanePresence,
+    workerLive: (id) => workerLive(store, id),
     reviewerConfigured: () => reviewerConfigured(store),
     artifactApiUrl,
     summarizeArtifact: (origin, meta) => summarizeArtifact(store, origin, meta),

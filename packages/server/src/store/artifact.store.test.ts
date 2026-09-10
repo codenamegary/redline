@@ -19,10 +19,12 @@ import {
   readFeedbackDoc,
   readFeedbackView,
   replaceThinkingMessage,
+  rollbackIteration,
   saveVersionAsset,
   setThreadStatus,
   startIteration,
   Store,
+  touchIteration,
 } from "./artifact.store"
 import { isStoreError } from "./errors"
 
@@ -251,6 +253,65 @@ describe("artifact store", () => {
     })
     await setThreadStatus(store, meta.id, openThread.id, "resolved")
     expect(await countOpenThreads(store, meta.id)).toBe(1)
+  })
+
+  it("stamps heartbeat and host session on the pending batch", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    await appendThread(store, meta.id, { version: "v1", anchor: null, body: "fix", author: "user" })
+    await startIteration(store, meta.id)
+
+    await touchIteration(store, meta.id, { adapterId: "acp", sessionId: "acp-a1-1" })
+    const first = (await readArtifactMeta(store, meta.id)).versions.find((row) => row.batch !== undefined)
+    expect(first?.batch?.adapterId).toBe("acp")
+    expect(first?.batch?.sessionId).toBe("acp-a1-1")
+    expect(first?.batch?.heartbeatAt).toBeDefined()
+
+    await new Promise((resolve) => setTimeout(resolve, 5))
+    await touchIteration(store, meta.id)
+    const second = (await readArtifactMeta(store, meta.id)).versions.find((row) => row.batch !== undefined)
+    expect(second?.batch?.heartbeatAt && first?.batch?.heartbeatAt).toBeDefined()
+    expect(Date.parse(second?.batch?.heartbeatAt ?? "")).toBeGreaterThan(Date.parse(first?.batch?.heartbeatAt ?? ""))
+
+    // A touch after publish is a no-op: there is nothing pending.
+    await publishIteration(store, meta.id, { html: "<p>2</p>" })
+    await touchIteration(store, meta.id, { adapterId: "x", sessionId: "y" })
+    const published = await readArtifactMeta(store, meta.id)
+    expect(published.status).toBe("review")
+    expect(published.versions[0]?.batch?.sessionId).toBeUndefined()
+  })
+
+  it("rolls a pending iteration back to review and frees the version number", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const thread = await appendThread(store, meta.id, {
+      version: "v1",
+      anchor: null,
+      body: "still broken",
+      author: "user",
+    })
+    await startIteration(store, meta.id)
+
+    const rolled = await rollbackIteration(store, meta.id)
+    expect(rolled.status).toBe("review")
+    expect(rolled.versions).toHaveLength(1)
+    expect((await readFeedbackView(store, meta.id)).threads[0]?.status).toBe("open")
+
+    // Rollback is rejected outside an iterating round.
+    let conflict: unknown
+    try {
+      await rollbackIteration(store, meta.id)
+    } catch (error) {
+      conflict = error
+    }
+    expect(isStoreError(conflict)).toBe(true)
+
+    // Re-iterating after a rollback reuses the version number cleanly.
+    const round = await startIteration(store, meta.id)
+    expect(round.version.version).toBe("v2")
+    await publishIteration(store, meta.id, { html: "<p>2</p>" })
+    await setThreadStatus(store, meta.id, thread.id, "resolved")
+    expect((await readArtifactMeta(store, meta.id)).current).toBe("v2")
   })
 
   it("keeps threads visible across versions in the artifact-scoped view", async () => {

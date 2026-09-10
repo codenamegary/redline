@@ -82,3 +82,34 @@ export const useThreadStatusMutation = (id: string) => {
     },
   })
 }
+
+// Stop the running (or orphaned) iteration and return the artifact to review.
+export const useStopIterationMutation = (id: string) => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (): Promise<unknown> =>
+      httpPost("/api/v1/artifacts/" + id + "/iterations/current/stop", {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.feedback(id) })
+      void queryClient.invalidateQueries({ queryKey: queryKeys.artifacts.all })
+    },
+  })
+}
+
+export type IterationLog = {
+  running: boolean
+  adapterId: string | null
+  sessionId: string | null
+  heartbeatAt: string | null
+  log: string
+}
+
+// Live worker session transcript; polled only while the log panel is open.
+export const useIterationLogQuery = (id: string, enabled: boolean) =>
+  useQuery({
+    queryKey: queryKeys.iterationLog(id),
+    queryFn: async (): Promise<IterationLog> =>
+      (await httpGet("/api/v1/artifacts/" + id + "/iterations/current/log")) as IterationLog,
+    enabled: enabled,
+    refetchInterval: enabled ? 2000 : false,
+  })

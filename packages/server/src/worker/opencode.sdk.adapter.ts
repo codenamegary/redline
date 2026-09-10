@@ -60,6 +60,26 @@ const responseText = (response: unknown): string => {
     .join("")
 }
 
+// The message list endpoint returns one entry per turn; entries carry
+// { info: { role }, parts }. Rendered as a plain transcript — best effort,
+// shape drift reads as an empty log.
+const transcript = (entries: unknown): string => {
+  if (!Array.isArray(entries)) return ""
+  const lines: string[] = []
+  for (const entry of entries) {
+    if (!isRecord(entry) || !isRecord(entry.info)) continue
+    const role = typeof entry.info.role === "string" ? entry.info.role : "message"
+    const parts = Array.isArray(entry.parts) ? entry.parts : []
+    const text = parts
+      .filter(isRecord)
+      .filter((part) => part.type === "text" && typeof part.text === "string")
+      .map((part) => part.text)
+      .join("")
+    if (text.length > 0) lines.push("[" + role + "] " + text)
+  }
+  return lines.join("\n\n")
+}
+
 export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): HostAdapter => {
   const sessions = new Map<string, SessionState>()
 
@@ -138,6 +158,32 @@ export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): Ho
         })
       } catch {
         // Ignored on purpose.
+      }
+    },
+    // Stop = delete the session: the server tears the turn down and the
+    // in-flight message request settles (usually with an error).
+    interrupt: async (session) => {
+      try {
+        const serverUrl = await options.getServerUrl()
+        await fetch(serverUrl + "/session/" + encodeURIComponent(session.hostSessionId), {
+          method: "DELETE",
+        })
+      } catch {
+        // Ignored on purpose.
+      }
+    },
+    // Read-only transcript of the session so far; the server keeps it even
+    // while a turn is in flight. Empty string when unreachable.
+    sessionLog: async (session) => {
+      try {
+        const serverUrl = await options.getServerUrl()
+        const response = await requestJson(
+          serverUrl + "/session/" + encodeURIComponent(session.hostSessionId) + "/message",
+          { method: "GET" },
+        )
+        return transcript(response)
+      } catch {
+        return ""
       }
     },
   }
