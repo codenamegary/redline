@@ -760,8 +760,7 @@ describe("agent lane dispatch", () => {
   const recorded: {
     duties: DutyInput[]
     seeds: (SeedSpec | undefined)[]
-    notes: { origin: OriginRef; text: string }[]
-  } = { duties: [], seeds: [], notes: [] }
+  } = { duties: [], seeds: [] }
   const pending: { promise: Promise<DutyResult>; resolve: (result: DutyResult) => void; reject: (error: Error) => void }[] = []
 
   const deferred = (): (typeof pending)[number] => {
@@ -796,9 +795,6 @@ describe("agent lane dispatch", () => {
       return gate.promise
     },
     discard: async () => {},
-    notifyOrigin: async (origin: OriginRef, text: string) => {
-      recorded.notes.push({ origin: origin, text: text })
-    },
     interrupt: () => {
       const gate = pending[pending.length - 1]
       gate?.reject(new Error("interrupted"))
@@ -819,7 +815,6 @@ describe("agent lane dispatch", () => {
   beforeEach(() => {
     recorded.duties.length = 0
     recorded.seeds.length = 0
-    recorded.notes.length = 0
     pending.length = 0
   })
 
@@ -967,9 +962,6 @@ describe("agent lane dispatch", () => {
       const messages = view.threads[0]?.messages ?? []
       return messages[1]?.kind === "text" && messages[1]?.body === "reply:" + (placeholder?.id ?? "")
     })
-    await waitFor(() => recorded.notes.length === 1)
-    expect(recorded.notes[0]?.text).toBe("replied to 1 thread(s) on Lane reply (v1)")
-    expect(recorded.notes[0]?.origin).toEqual({ host: "opencode", sessionId: "s-b" })
   })
 
   it("places and answers a placeholder when the reviewer configures after create", async () => {
@@ -1075,7 +1067,6 @@ describe("agent lane dispatch", () => {
     })
     const document = await laneApp.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
     expect(document.body).toContain("fake next")
-    await waitFor(() => recorded.notes.some((note) => note.text === "published v2 of Lane iterate — redline-note"))
     // The worker reports back on the batch thread once the version lands.
     const doneView = await laneView(created.id)
     const doneMessages = doneView.threads.find((entry) => entry.id === thread.id)?.messages ?? []
@@ -1113,10 +1104,9 @@ describe("agent lane dispatch", () => {
     const view = await laneView(created.id)
     expect(view.current).toBe("v2")
     expect(view.versions).toHaveLength(2)
-    expect(recorded.notes).toHaveLength(0)
   })
 
-  it("approve unbinds the lanes and notifies origin", async () => {
+  it("approve unbinds the lanes", async () => {
     const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", {
       host: "opencode",
       sessionId: "s-g",
@@ -1146,24 +1136,6 @@ describe("agent lane dispatch", () => {
         workerRuntime.current?.presence(created.id).reviewerBound === false &&
         workerRuntime.current?.presence(created.id).workerBound === false,
     )
-    await waitFor(() => recorded.notes.some((note) => note.text === "v2 approved — done for now"))
-    expect(recorded.notes.find((note) => note.text === "v2 approved — done for now")?.origin).toEqual({
-      host: "opencode",
-      sessionId: "s-g",
-    })
-  })
-
-  it("does not notify when the artifact has no origin", async () => {
-    const created = await createLaneArtifact("Lane no origin", "<p>lane-h</p>")
-    await waitForBound(created.id)
-
-    await createLaneThread(created.id, "anonymous comment")
-    const dutyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane no origin")
-    resolveDuty(dutyIndex)
-    await waitFor(async () => (await laneView(created.id)).threads[0]?.messages[1]?.kind === "text")
-    // origin is absent: notifyOrigin early-returns before any adapter is
-    // consulted, so no note can appear no matter how the duty settles.
-    expect(recorded.notes).toHaveLength(0)
   })
 
   it("marks placeholders unavailable when the reviewer lane fails", async () => {

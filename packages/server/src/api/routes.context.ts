@@ -50,10 +50,6 @@ export type RoutesContext = {
   reviewerConfigured: () => Promise<boolean>
   artifactApiUrl: (origin: string, id: string) => string
   summarizeArtifact: (origin: string, meta: ArtifactMeta) => Promise<ArtifactSummary>
-  notifyOriginLine: (
-    artifactId: string,
-    line: (meta: ArtifactMeta) => string,
-  ) => Promise<void>
   dispatchReplies: (artifactId: string) => Promise<void>
   workerStatus: (id: string) => Promise<unknown>
   dispatchIteration: (
@@ -206,18 +202,6 @@ export const postThreadNotes = async (
   }
 }
 
-// Every origin ping reads origin (plus title/current) from fresh meta at
-// send time, so approvals and publishes that raced the duty still read right.
-const notifyOriginLine = async (
-  store: Store,
-  artifactId: string,
-  line: (meta: ArtifactMeta) => string,
-): Promise<void> => {
-  const meta = await readArtifactMeta(store, artifactId).catch(() => undefined)
-  if (meta === undefined) return
-  await workerRuntime.current?.notifyOrigin(artifactId, meta.origin, line(meta))
-}
-
 // Fire-and-forget reviewer dispatch, called at the end of the comment
 // routes after the response payload is built. Never awaited by the route.
 const dispatchReplies = async (store: Store, artifactId: string): Promise<void> => {
@@ -274,16 +258,9 @@ const handleReplies = async (
   artifactId: string,
   items: { threadId: string; messageId: string; body: string }[],
 ): Promise<void> => {
-  let applied = 0
   for (const item of items) {
-    if (await tryPatchTarget(store, artifactId, item, item.body)) applied += 1
+    await tryPatchTarget(store, artifactId, item, item.body)
   }
-  if (applied === 0) return
-  await notifyOriginLine(
-    store,
-    artifactId,
-    (meta) => "replied to " + String(applied) + " thread(s) on " + meta.title + " (" + meta.current + ")",
-  )
 }
 
 const handleDocument = async (
@@ -304,11 +281,6 @@ const handleDocument = async (
     artifactId,
     publishedRow?.batch?.threadIds ?? [],
     "Addressed in " + fresh.current + (note === "" ? "." : ". " + note),
-  )
-  await notifyOriginLine(
-    store,
-    artifactId,
-    (fresh) => "published " + fresh.current + " of " + fresh.title + " — " + (doc.note ?? ""),
   )
 }
 
@@ -335,7 +307,6 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
     pending.batch?.threadIds ?? [],
     "Iteration failed: " + detail + " — threads stay open; Iterate again when ready.",
   )
-  await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
 }
 
 // Lane debug view for plugins: what is configured vs what is actually live,
@@ -455,7 +426,6 @@ export const createRoutesContext = (store: Store, seams?: RoutesSeams): RoutesCo
     reviewerConfigured: () => reviewerConfigured(store),
     artifactApiUrl,
     summarizeArtifact: (origin, meta) => summarizeArtifact(store, origin, meta),
-    notifyOriginLine: (artifactId, line) => notifyOriginLine(store, artifactId, line),
     dispatchReplies: (artifactId) => dispatchReplies(store, artifactId),
     workerStatus: (id) => workerStatus(store, id),
     dispatchIteration: (id, meta, version, settings) =>

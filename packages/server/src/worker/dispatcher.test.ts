@@ -12,7 +12,6 @@ import {
   DutyResult,
   HostAdapter,
   Lane,
-  OriginRef,
   SeedSpec,
 } from "./host.adapter"
 import { createDispatcher, DispatcherAdapters, DispatcherHandlers } from "./dispatcher"
@@ -68,18 +67,16 @@ type FakeAdapter = {
   ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec; cwd?: string }[]
   dutyCalls: { session: AgentSession; input: DutyInput }[]
   discards: AgentSession[]
-  notifyCalls: { origin: OriginRef; text: string }[]
   results: DutyResult[]
   failures: string[]
   hold: () => void
   release: () => void
 }
 
-const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
+const fakeAdapter = (id: AdapterId): FakeAdapter => {
   const ensureCalls: { lane: Lane; artifactId: string; seed?: SeedSpec; cwd?: string }[] = []
   const dutyCalls: { session: AgentSession; input: DutyInput }[] = []
   const discards: AgentSession[] = []
-  const notifyCalls: { origin: OriginRef; text: string }[] = []
   const results: DutyResult[] = []
   const failures: string[] = []
   let held = false
@@ -109,17 +106,11 @@ const fakeAdapter = (id: AdapterId, withNotifyOrigin = true): FakeAdapter => {
       discards.push(session)
     },
   }
-  if (withNotifyOrigin) {
-    adapter.notifyOrigin = async (origin, text) => {
-      notifyCalls.push({ origin, text })
-    }
-  }
   return {
     adapter,
     ensureCalls,
     dutyCalls,
     discards,
-    notifyCalls,
     results,
     failures,
     hold: () => {
@@ -398,55 +389,5 @@ describe("dispatcher", () => {
     await waitFor(() => first.discards.length === 1)
     expect(first.discards[0]?.hostSessionId).toBe(first.dutyCalls[0]?.session.hostSessionId)
     expect(second.discards).toHaveLength(0)
-  })
-
-  it("notifyOrigin: skips non-opencode hosts, no-ops without origin or setting, prefers the worker adapter", async () => {
-    const home = await makeHome((settings) => ({
-      ...settings,
-      reviewer: { ...settings.reviewer, adapter: "opencode-sdk" },
-      worker: { ...settings.worker, adapter: "acp" },
-    }))
-    const workerFake = fakeAdapter("acp")
-    const reviewerFake = fakeAdapter("opencode-sdk", false)
-    const { dispatcher } = makeDispatcher(home, {
-      acp: workerFake.adapter,
-      "opencode-sdk": reviewerFake.adapter,
-    })
-    // prompt_async is OpenCode-only: a pi origin never notifies.
-    await dispatcher.notifyOrigin("a1", { host: "pi", sessionId: "s1" }, "iteration published")
-    expect(workerFake.notifyCalls).toEqual([])
-
-    const origin: OriginRef = { host: "opencode", sessionId: "s1" }
-    await dispatcher.notifyOrigin("a1", origin, "iteration published")
-    expect(workerFake.notifyCalls).toEqual([{ origin, text: "iteration published" }])
-
-    // An undefined origin is a no-op.
-    await dispatcher.notifyOrigin("a1", undefined, "hello")
-    expect(workerFake.notifyCalls).toHaveLength(1)
-
-    // notifyOrigin disabled in settings is a no-op.
-    const quietHome = await makeHome((settings) => ({
-      ...settings,
-      notifyOrigin: false,
-      reviewer: { ...settings.reviewer, adapter: "opencode-sdk" },
-      worker: { ...settings.worker, adapter: "acp" },
-    }))
-    const quietWorkerFake = fakeAdapter("acp")
-    const quietDispatcher = makeDispatcher(quietHome, { acp: quietWorkerFake.adapter }).dispatcher
-    await quietDispatcher.notifyOrigin("a1", origin, "hello")
-    expect(quietWorkerFake.notifyCalls).toEqual([])
-
-    // With the worker lane unconfigured, the reviewer adapter answers.
-    const reviewerOnlyHome = await makeHome((settings) => ({
-      ...settings,
-      worker: { ...settings.worker, adapter: "none" },
-      reviewer: { ...settings.reviewer, adapter: "opencode-sdk" },
-    }))
-    const reviewerOnlyFake = fakeAdapter("opencode-sdk")
-    const reviewerOnlyDispatcher = makeDispatcher(reviewerOnlyHome, {
-      "opencode-sdk": reviewerOnlyFake.adapter,
-    }).dispatcher
-    await reviewerOnlyDispatcher.notifyOrigin("a1", origin, "hello")
-    expect(reviewerOnlyFake.notifyCalls).toEqual([{ origin, text: "hello" }])
   })
 })

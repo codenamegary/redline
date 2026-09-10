@@ -41,7 +41,6 @@ export type HostAdapter = {
   ensureSession(lane: Lane, artifactId: string, seed?: SeedSpec, cwd?: string): Promise<AgentSession>
   runDuty(session: AgentSession, input: DutyInput): Promise<DutyResult>
   discard?(session: AgentSession): Promise<void>
-  notifyOrigin?(origin: OriginRef, text: string): Promise<void>
   // Best-effort cancel of an in-flight duty: the current turn is aborted so
   // runDuty throws (or has already settled) and the lane can be failed.
   interrupt?(session: AgentSession): Promise<void> | void

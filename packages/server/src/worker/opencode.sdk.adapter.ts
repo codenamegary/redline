@@ -6,7 +6,6 @@ import {
   DutyResult,
   HostAdapter,
   Lane,
-  OriginRef,
   SeedSpec,
 } from "./host.adapter"
 import { errorDetail, isRecord } from "./util"
@@ -141,20 +140,6 @@ export const createOpenCodeSdkAdapter = (options: OpenCodeSdkAdapterOptions): Ho
         const serverUrl = await options.getServerUrl()
         await fetch(serverUrl + "/session/" + encodeURIComponent(session.hostSessionId), {
           method: "DELETE",
-        })
-      } catch {
-        // Ignored on purpose.
-      }
-    },
-    // Courtesy fire-and-forget ping to the agent session that created the
-    // artifact: never surfaces failures to the caller.
-    notifyOrigin: async (origin: OriginRef, text: string) => {
-      try {
-        const base = origin.serverUrl ?? (await options.getServerUrl())
-        await fetch(base + "/session/" + encodeURIComponent(origin.sessionId) + "/prompt_async", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ parts: [{ type: "text", text: text }] }),
         })
       } catch {
         // Ignored on purpose.

@@ -308,33 +308,6 @@ describe("opencode sdk adapter", () => {
     expect(detail.startsWith("opencode server unreachable at http://127.0.0.1:")).toBe(true)
   })
 
-  it("posts prompt_async to origin.serverUrl, falls back to the adapter server, and never throws", async () => {
-    const server = makeServer()
-    const adapter = makeAdapter(server.url)
-
-    await adapter.notifyOrigin?.(
-      { host: "opencode", sessionId: "ses_origin", serverUrl: server.url },
-      "published v2 of landing page",
-    )
-    const asyncRequests = server.requests.filter((request) => request.path.endsWith("/prompt_async"))
-    expect(asyncRequests).toHaveLength(1)
-    expect(recorded(asyncRequests, 0).method).toBe("POST")
-    expect(recorded(asyncRequests, 0).body).toEqual({
-      parts: [{ type: "text", text: "published v2 of landing page" }],
-    })
-
-    await adapter.notifyOrigin?.({ host: "opencode", sessionId: "ses_fallback" }, "fallback ping")
-    const fallback = server.requests.filter((request) => request.path.endsWith("/prompt_async"))
-    expect(fallback).toHaveLength(2)
-    expect(recorded(fallback, 1).path).toBe("/session/ses_fallback/prompt_async")
-
-    const dead = makeAdapter(closedPortUrl())
-    await dead.notifyOrigin?.(
-      { host: "opencode", sessionId: "ses_dead", serverUrl: closedPortUrl() },
-      "into the void",
-    )
-  })
-
   it("discards via DELETE, tolerates failure, and no-ops for unknown sessions", async () => {
     const server = makeServer()
     server.setMessageText(workerDocText)

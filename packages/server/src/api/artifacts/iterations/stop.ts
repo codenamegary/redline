@@ -34,7 +34,6 @@ export const stopIterationRoute = (ctx: RoutesContext): RouteDescriptor => ({
         ? "Iteration stopped — threads stay open."
         : "Iteration stopped (worker was not running) — threads stay open.",
     )
-    void ctx.notifyOriginLine(id, () => "iteration stopped on " + updated.title).catch(() => undefined)
     return { status: updated.status, current: updated.current, stoppedVersion: pending.version }
   },
 })
