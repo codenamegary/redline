@@ -7,7 +7,7 @@ import { LanesEditor, laneIds, LaneForm, LaneId } from "./LanesEditor"
 import { PromptsEditor } from "./PromptsEditor"
 import { useDefaultsQuery, useProbeMutation, useSaveSettingsMutation, useSettingsQuery } from "./queries"
 
-const tagline = "agent lanes, prompt templates, and origin notifications"
+const tagline = "agent lanes and prompt templates"
 
 // ---------- settings form state ----------
 
@@ -15,8 +15,6 @@ export type SettingsForm = {
   reviewer: LaneForm
   worker: LaneForm
   prompts: Record<LaneId, string>
-  notifyOrigin: boolean
-  opencodeServerUrl: string
   imageGen: { enabled: boolean; agent: string; model: string }
 }
 
@@ -24,15 +22,12 @@ const laneFormFrom = (config: LaneConfig): LaneForm => ({
   adapter: config.adapter,
   preset: config.preset,
   command: config.acpCommand.join(" "),
-  model: config.model,
 })
 
 const settingsFormFrom = (settings: RedlineSettings): SettingsForm => ({
   reviewer: laneFormFrom(settings.reviewer),
   worker: laneFormFrom(settings.worker),
   prompts: { reviewer: settings.prompts.reviewer, worker: settings.prompts.worker },
-  notifyOrigin: settings.notifyOrigin,
-  opencodeServerUrl: settings.opencodeServerUrl,
   imageGen: {
     enabled: settings.imageGen.enabled,
     agent: settings.imageGen.agent,
@@ -45,7 +40,6 @@ const laneConfigFrom = (form: LaneForm): LaneConfig =>
     adapter: form.adapter,
     preset: form.preset,
     acpCommand: splitCommand(form.command),
-    model: form.model,
   })
 
 const settingsPayload = (form: SettingsForm): RedlineSettings =>
@@ -57,8 +51,6 @@ const settingsPayload = (form: SettingsForm): RedlineSettings =>
       agent: form.imageGen.agent.trim(),
       model: form.imageGen.model.trim(),
     },
-    notifyOrigin: form.notifyOrigin,
-    opencodeServerUrl: form.opencodeServerUrl.trim(),
     prompts: { reviewer: form.prompts.reviewer, worker: form.prompts.worker },
   })
 
@@ -92,12 +84,11 @@ export const splitCommand = (line: string): string[] => {
 
 // ---------- page ----------
 
-type TabId = LaneId | "notify" | "imagegen"
+type TabId = LaneId | "imagegen"
 
 const tabs: Array<{ id: TabId; label: string }> = [
   { id: "reviewer", label: "Reviewer" },
   { id: "worker", label: "Worker" },
-  { id: "notify", label: "Notify" },
   { id: "imagegen", label: "Image Gen" },
 ]
 
@@ -228,46 +219,6 @@ export const SettingsPage: React.FC = () => {
                   show("template reset (unsaved — hit Save)", true)
                 }}
               />
-            </div>
-          ) : null}
-          {tab === "notify" ? (
-            <div className="flex flex-col gap-3.5">
-              <h2 className="m-0 text-[15px]">Notify</h2>
-              <label className="flex flex-col gap-1 text-xs text-mist">
-                Origin notifications
-                <select
-                  value={form.notifyOrigin ? "true" : "false"}
-                  onChange={(event) =>
-                    setDraft((previous) => {
-                      const base = previous ?? form
-                      return { ...base, notifyOrigin: event.target.value === "true" }
-                    })
-                  }
-                  className={inputClass}
-                >
-                  <option value="true">Post a one-line status when a duty finishes</option>
-                  <option value="false">Never post to the origin session</option>
-                </select>
-              </label>
-              <label className="flex flex-col gap-1 text-xs text-mist">
-                OpenCode server URL
-                <input
-                  type="text"
-                  value={form.opencodeServerUrl}
-                  spellCheck={false}
-                  autoComplete="off"
-                  onChange={(event) =>
-                    setDraft((previous) => {
-                      const base = previous ?? form
-                      return { ...base, opencodeServerUrl: event.target.value }
-                    })
-                  }
-                  className={inputClass}
-                />
-                <span className="text-xs text-mist">
-                  Only used when create stored an origin and the lane adapter can notify.
-                </span>
-              </label>
             </div>
           ) : null}
           {tab === "imagegen" ? (

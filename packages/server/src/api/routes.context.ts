@@ -25,7 +25,6 @@ import {
   workerRuntime,
 } from "../worker/dispatcher"
 import { DutyResult, Lane, SeedSpec, ThreadRef } from "../worker/host.adapter"
-import { createOpenCodeSdkAdapter } from "../worker/opencode.sdk.adapter"
 import { AcpProbe, probeAcpHandshake } from "../worker/probe"
 
 export type RouteDescriptor = {
@@ -50,10 +49,6 @@ export type RoutesContext = {
   reviewerConfigured: () => Promise<boolean>
   artifactApiUrl: (origin: string, id: string) => string
   summarizeArtifact: (origin: string, meta: ArtifactMeta) => Promise<ArtifactSummary>
-  notifyOriginLine: (
-    artifactId: string,
-    line: (meta: ArtifactMeta) => string,
-  ) => Promise<void>
   dispatchReplies: (artifactId: string) => Promise<void>
   workerStatus: (id: string) => Promise<unknown>
   dispatchIteration: (
@@ -206,18 +201,6 @@ export const postThreadNotes = async (
   }
 }
 
-// Every origin ping reads origin (plus title/current) from fresh meta at
-// send time, so approvals and publishes that raced the duty still read right.
-const notifyOriginLine = async (
-  store: Store,
-  artifactId: string,
-  line: (meta: ArtifactMeta) => string,
-): Promise<void> => {
-  const meta = await readArtifactMeta(store, artifactId).catch(() => undefined)
-  if (meta === undefined) return
-  await workerRuntime.current?.notifyOrigin(artifactId, meta.origin, line(meta))
-}
-
 // Fire-and-forget reviewer dispatch, called at the end of the comment
 // routes after the response payload is built. Never awaited by the route.
 const dispatchReplies = async (store: Store, artifactId: string): Promise<void> => {
@@ -274,16 +257,9 @@ const handleReplies = async (
   artifactId: string,
   items: { threadId: string; messageId: string; body: string }[],
 ): Promise<void> => {
-  let applied = 0
   for (const item of items) {
-    if (await tryPatchTarget(store, artifactId, item, item.body)) applied += 1
+    await tryPatchTarget(store, artifactId, item, item.body)
   }
-  if (applied === 0) return
-  await notifyOriginLine(
-    store,
-    artifactId,
-    (meta) => "replied to " + String(applied) + " thread(s) on " + meta.title + " (" + meta.current + ")",
-  )
 }
 
 const handleDocument = async (
@@ -304,11 +280,6 @@ const handleDocument = async (
     artifactId,
     publishedRow?.batch?.threadIds ?? [],
     "Addressed in " + fresh.current + (note === "" ? "." : ". " + note),
-  )
-  await notifyOriginLine(
-    store,
-    artifactId,
-    (fresh) => "published " + fresh.current + " of " + fresh.title + " — " + (doc.note ?? ""),
   )
 }
 
@@ -335,13 +306,12 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
     pending.batch?.threadIds ?? [],
     "Iteration failed: " + detail + " — threads stay open; Iterate again when ready.",
   )
-  await notifyOriginLine(store, artifactId, () => "worker failed: " + detail)
 }
 
-// Lane debug view for plugins: what is configured vs what is actually live,
-// plus the origin the artifact came from (null when created headless).
+// Lane debug view: what is configured vs what is actually live. Reads meta
+// so unknown artifact ids surface as 404.
 const workerStatus = async (store: Store, id: string) => {
-  const meta = await readArtifactMeta(store, id)
+  await readArtifactMeta(store, id)
   const settings = await readEffectiveSettings(store.home)
   const presence = workerRuntime.current?.presence(id)
   return {
@@ -356,7 +326,6 @@ const workerStatus = async (store: Store, id: string) => {
       running: presence?.workerRunning ?? false,
       bound: presence?.workerBound ?? false,
     },
-    origin: meta.origin ?? null,
   }
 }
 
@@ -395,15 +364,12 @@ const dispatchIteration = async (
       targets: [],
       batchThreadIds: batchThreadIds,
       htmlPath: htmlPath,
-      // Project directory captured at create time: the worker spawns there
-      // and reads the originating repo (read-only).
-      cwd: meta.origin?.cwd,
     },
     seed,
   )
   if (!bound || !enqueued) {
-    // The status already flipped, so fail the lane (notifies origin) and let
-    // the user re-Iterate or the fallback agent publish.
+    // The status already flipped, so fail the lane and let the user
+    // re-Iterate or the fallback agent publish.
     await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
     return false
   }
@@ -430,10 +396,6 @@ export const installDispatcher = (store: Store, seams?: RoutesSeams): void => {
       acp: createAcpAdapter({
         getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
       }),
-      "opencode-sdk": createOpenCodeSdkAdapter({
-        getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
-        getServerUrl: async () => (await readEffectiveSettings(store.home)).opencodeServerUrl,
-      }),
     },
     handlers: {
       onReplies: (artifactId, result) => handleReplies(store, artifactId, result.items),
@@ -455,7 +417,6 @@ export const createRoutesContext = (store: Store, seams?: RoutesSeams): RoutesCo
     reviewerConfigured: () => reviewerConfigured(store),
     artifactApiUrl,
     summarizeArtifact: (origin, meta) => summarizeArtifact(store, origin, meta),
-    notifyOriginLine: (artifactId, line) => notifyOriginLine(store, artifactId, line),
     dispatchReplies: (artifactId) => dispatchReplies(store, artifactId),
     workerStatus: (id) => workerStatus(store, id),
     dispatchIteration: (id, meta, version, settings) =>

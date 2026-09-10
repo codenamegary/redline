@@ -7,7 +7,6 @@ import {
   DutyResult,
   HostAdapter,
   Lane,
-  OriginRef,
   SeedSpec,
 } from "./host.adapter"
 import { errorDetail } from "./util"
@@ -53,7 +52,6 @@ export type Dispatcher = {
   // One work duty per artifact at a time. Iterate is user-gated and ever
   // has one pending batch, so a running worker rejects instead of queuing.
   enqueueWork: (artifactId: string, input: DutyInput, seed?: SeedSpec) => boolean
-  notifyOrigin: (artifactId: string, origin: OriginRef | undefined, text: string) => Promise<void>
   // Internal error path: reports and resets the lane. A reviewer crash
   // unbinds; a worker crash returns the lane to idle.
   fail: (artifactId: string, lane: Lane, detail: string) => Promise<void>
@@ -80,9 +78,6 @@ type ArtifactRuntime = {
 }
 
 type CachedSession = { adapter: HostAdapter; session: AgentSession }
-
-const canNotify = (adapter: HostAdapter): boolean =>
-  adapter.canNotifyOrigin() && adapter.notifyOrigin !== undefined
 
 // How often a running work duty stamps the pending batch's heartbeat.
 const heartbeatIntervalMs = 15_000
@@ -284,24 +279,6 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
       if (!runtime.workerBound || runtime.workerRunning) return false
       void runWorkDuty(artifactId, input, seed)
       return true
-    },
-
-    notifyOrigin: async (artifactId, origin, text) => {
-      if (origin === undefined) return
-      // prompt_async is OpenCode-only: a pi origin session id would be
-      // POSTed to an OpenCode server, so other hosts never notify.
-      if (origin.host !== "opencode") return
-      const settings = await readEffectiveSettings(home)
-      if (!settings.notifyOrigin) return
-      const workerAdapter = adapterFor("worker", settings)
-      const reviewerAdapter = adapterFor("reviewer", settings)
-      const chosen =
-        workerAdapter !== undefined && canNotify(workerAdapter)
-          ? workerAdapter
-          : reviewerAdapter !== undefined && canNotify(reviewerAdapter)
-            ? reviewerAdapter
-            : undefined
-      await chosen?.notifyOrigin?.(origin, text)
     },
 
     fail,

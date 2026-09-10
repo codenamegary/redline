@@ -21,14 +21,5 @@
     "prefer-const": "error",
     "no-var": "error",
     "no-param-reassign": ["error", { "props": true }]
-  },
-  "overrides": [
-    {
-      "files": ["src/pi/**/*.ts"],
-      "rules": {
-        "import/no-default-export": "off",
-        "typescript/consistent-type-imports": "off"
-      }
-    }
-  ]
+  }
 }

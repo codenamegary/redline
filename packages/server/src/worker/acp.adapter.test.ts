@@ -75,7 +75,6 @@ const laneConfig = (argv: string[]): LaneConfig => ({
   adapter: "acp",
   preset: "custom",
   acpCommand: argv,
-  model: "",
 })
 
 const makeAdapter = (commands: { reviewer?: string[]; worker?: string[] }): AcpAdapter =>

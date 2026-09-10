@@ -8,8 +8,8 @@ import { z } from "zod"
 import { FastifyInstance } from "fastify"
 
 import { buildServer } from "../server"
-import { openStore, readArtifactMeta, startIteration } from "../store/artifact.store"
-import { workerRuntime } from "../worker/dispatcher"
+import { openStore, startIteration } from "../store/artifact.store"
+import { workerRuntime, DispatcherAdapters } from "../worker/dispatcher"
 import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
 import {
   AgentSession,
@@ -17,7 +17,6 @@ import {
   DutyResult,
   HostAdapter,
   Lane,
-  OriginRef,
   SeedSpec,
 } from "../worker/host.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
@@ -340,7 +339,6 @@ describe("artifact api", () => {
       attached: false,
       reviewer: { adapter: "none", bound: false },
       worker: { adapter: "none", running: false, bound: false },
-      origin: null,
     })
 
     const missing = await app.inject({
@@ -760,8 +758,7 @@ describe("agent lane dispatch", () => {
   const recorded: {
     duties: DutyInput[]
     seeds: (SeedSpec | undefined)[]
-    notes: { origin: OriginRef; text: string }[]
-  } = { duties: [], seeds: [], notes: [] }
+  } = { duties: [], seeds: [] }
   const pending: { promise: Promise<DutyResult>; resolve: (result: DutyResult) => void; reject: (error: Error) => void }[] = []
 
   const deferred = (): (typeof pending)[number] => {
@@ -784,7 +781,6 @@ describe("agent lane dispatch", () => {
 
   const fakeAcp: HostAdapter = {
     id: "acp",
-    canNotifyOrigin: () => true,
     ensureSession: async (lane: Lane, artifactId: string, seed?: SeedSpec) => {
       recorded.seeds.push(seed)
       return { artifactId: artifactId, lane: lane, hostSessionId: "fake-1" }
@@ -796,9 +792,6 @@ describe("agent lane dispatch", () => {
       return gate.promise
     },
     discard: async () => {},
-    notifyOrigin: async (origin: OriginRef, text: string) => {
-      recorded.notes.push({ origin: origin, text: text })
-    },
     interrupt: () => {
       const gate = pending[pending.length - 1]
       gate?.reject(new Error("interrupted"))
@@ -806,9 +799,13 @@ describe("agent lane dispatch", () => {
     sessionLog: async () => "fake session log",
   }
 
+  // Mutable so the bind-timeout tests can pull the adapter out of the
+  // registry: a configured lane whose adapter is missing never binds.
+  const laneAdapters: DispatcherAdapters = { acp: fakeAcp }
+
   beforeAll(async () => {
     writeFileSync(join(laneHome, "settings.json"), laneSettings())
-    laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: { acp: fakeAcp } })
+    laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: laneAdapters })
   })
 
   afterAll(async () => {
@@ -819,7 +816,6 @@ describe("agent lane dispatch", () => {
   beforeEach(() => {
     recorded.duties.length = 0
     recorded.seeds.length = 0
-    recorded.notes.length = 0
     pending.length = 0
   })
 
@@ -870,12 +866,11 @@ describe("agent lane dispatch", () => {
   const createLaneArtifact = async (
     title: string,
     html: string,
-    origin?: OriginRef,
   ): Promise<z.infer<typeof SummarySchema>> => {
     const response = await laneApp.inject({
       method: "POST",
       url: "/api/v1/artifacts",
-      payload: { title: title, html: html, origin: origin },
+      payload: { title: title, html: html },
     })
     if (response.statusCode !== 201) throw new Error("lane fixture create failed: " + response.body)
     return SummarySchema.parse(response.json())
@@ -908,7 +903,7 @@ describe("agent lane dispatch", () => {
     expect(response.statusCode).toBe(201)
   }
 
-  it("creates with origin, persists it, and reports lane status", async () => {
+  it("creates and reports lane status", async () => {
     const response = await laneApp.inject({
       method: "POST",
       url: "/api/v1/artifacts",
@@ -916,21 +911,12 @@ describe("agent lane dispatch", () => {
         title: "Lane create",
         html: "<p>lane-a</p>",
         prompt: "make it pop",
-        origin: { host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096", cwd: "/repo/coffee-site" },
       },
     })
     expect(response.statusCode).toBe(201)
     const summary = SummarySchema.parse(response.json())
     expect(["starting", "idle"]).toContain(summary.reviewer)
     expect(summary.worker).toBe("idle")
-
-    const meta = await readArtifactMeta(laneStore, summary.id)
-    expect(meta.origin).toEqual({
-      host: "pi",
-      sessionId: "sess-1",
-      serverUrl: "http://127.0.0.1:4096",
-      cwd: "/repo/coffee-site",
-    })
 
     await waitForBound(summary.id)
     const settled = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + summary.id })
@@ -941,10 +927,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("dispatches a reviewer duty on a comment and patches the placeholder with the reply", async () => {
-    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>", {
-      host: "opencode",
-      sessionId: "s-b",
-    })
+    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>")
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "the hero is huge")
@@ -967,9 +950,6 @@ describe("agent lane dispatch", () => {
       const messages = view.threads[0]?.messages ?? []
       return messages[1]?.kind === "text" && messages[1]?.body === "reply:" + (placeholder?.id ?? "")
     })
-    await waitFor(() => recorded.notes.length === 1)
-    expect(recorded.notes[0]?.text).toBe("replied to 1 thread(s) on Lane reply (v1)")
-    expect(recorded.notes[0]?.origin).toEqual({ host: "opencode", sessionId: "s-b" })
   })
 
   it("places and answers a placeholder when the reviewer configures after create", async () => {
@@ -1036,10 +1016,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("iterates with a worker: dispatches the batch with seed, then publishes the document", async () => {
-    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>", {
-      host: "opencode",
-      sessionId: "s-d",
-    })
+    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>")
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "add a footer")
@@ -1075,7 +1052,6 @@ describe("agent lane dispatch", () => {
     })
     const document = await laneApp.inject({ method: "GET", url: "/a/" + created.id + "/v2/index.html" })
     expect(document.body).toContain("fake next")
-    await waitFor(() => recorded.notes.some((note) => note.text === "published v2 of Lane iterate — redline-note"))
     // The worker reports back on the batch thread once the version lands.
     const doneView = await laneView(created.id)
     const doneMessages = doneView.threads.find((entry) => entry.id === thread.id)?.messages ?? []
@@ -1113,14 +1089,10 @@ describe("agent lane dispatch", () => {
     const view = await laneView(created.id)
     expect(view.current).toBe("v2")
     expect(view.versions).toHaveLength(2)
-    expect(recorded.notes).toHaveLength(0)
   })
 
-  it("approve unbinds the lanes and notifies origin", async () => {
-    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", {
-      host: "opencode",
-      sessionId: "s-g",
-    })
+  it("approve unbinds the lanes", async () => {
+    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>")
     await waitForBound(created.id)
 
     await createLaneThread(created.id, "polish")
@@ -1146,24 +1118,6 @@ describe("agent lane dispatch", () => {
         workerRuntime.current?.presence(created.id).reviewerBound === false &&
         workerRuntime.current?.presence(created.id).workerBound === false,
     )
-    await waitFor(() => recorded.notes.some((note) => note.text === "v2 approved — done for now"))
-    expect(recorded.notes.find((note) => note.text === "v2 approved — done for now")?.origin).toEqual({
-      host: "opencode",
-      sessionId: "s-g",
-    })
-  })
-
-  it("does not notify when the artifact has no origin", async () => {
-    const created = await createLaneArtifact("Lane no origin", "<p>lane-h</p>")
-    await waitForBound(created.id)
-
-    await createLaneThread(created.id, "anonymous comment")
-    const dutyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane no origin")
-    resolveDuty(dutyIndex)
-    await waitFor(async () => (await laneView(created.id)).threads[0]?.messages[1]?.kind === "text")
-    // origin is absent: notifyOrigin early-returns before any adapter is
-    // consulted, so no note can appear no matter how the duty settles.
-    expect(recorded.notes).toHaveLength(0)
   })
 
   it("marks placeholders unavailable when the reviewer lane fails", async () => {
@@ -1322,10 +1276,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("reports the worker debug view for configured lanes", async () => {
-    const created = await createLaneArtifact("Lane debug", "<p>lane-j</p>", {
-      host: "opencode",
-      sessionId: "s-j",
-    })
+    const created = await createLaneArtifact("Lane debug", "<p>lane-j</p>")
     await waitForBound(created.id)
 
     const response = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/worker" })
@@ -1335,15 +1286,14 @@ describe("agent lane dispatch", () => {
       attached: true,
       reviewer: { adapter: "acp", bound: true },
       worker: { adapter: "acp", running: false, bound: false },
-      origin: { host: "opencode", sessionId: "s-j" },
     })
   })
 
   it("patches outstanding placeholders when the reviewer bind never lands", async () => {
-    // Point the reviewer at an adapter id absent from the registry: attach
-    // never binds, so a comment's dispatch waits out the bind window and
-    // must fail the lane instead of leaving the placeholder dangling.
-    writeFileSync(join(laneHome, "settings.json"), laneSettings({ reviewer: "opencode-sdk" }))
+    // Pull the adapter from the registry: attach never binds, so a
+    // comment's dispatch waits out the bind window and must fail the lane
+    // instead of leaving the placeholder dangling.
+    delete laneAdapters.acp
     try {
       const created = await createLaneArtifact("Lane bind timeout", "<p>lane-k</p>")
       expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
@@ -1368,14 +1318,14 @@ describe("agent lane dispatch", () => {
       })
       await poller
     } finally {
-      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+      laneAdapters.acp = fakeAcp
     }
   })
 
   it("answers the iterate route with a distinct message when the worker lane fails to start", async () => {
-    // Worker adapter id absent from the registry: the bind window expires
+    // Worker adapter absent from the registry: the bind window expires
     // and the route fails the lane with its own conflict copy.
-    writeFileSync(join(laneHome, "settings.json"), laneSettings({ worker: "opencode-sdk" }))
+    delete laneAdapters.acp
     try {
       const created = await createLaneArtifact("Lane iterate fail", "<p>lane-l</p>")
       await createLaneThread(created.id, "will not dispatch")
@@ -1388,7 +1338,7 @@ describe("agent lane dispatch", () => {
       expect(response.statusCode).toBe(409)
       expect(response.json()).toMatchObject({ status: 409, detail: "worker lane failed to start" })
     } finally {
-      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+      laneAdapters.acp = fakeAcp
     }
   })
 })

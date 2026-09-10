@@ -2,9 +2,7 @@ import { Thread } from "@redline/http-contracts/artifact.models"
 
 export type Lane = "reviewer" | "worker"
 
-export type AdapterId = "acp" | "opencode-sdk" | "none"
-
-export type OriginRef = { host: string; sessionId: string; serverUrl?: string; cwd?: string }
+export type AdapterId = "acp" | "none"
 
 export type AgentSession = { artifactId: string; lane: Lane; hostSessionId: string }
 
@@ -26,8 +24,8 @@ export type DutyInput = {
   batchThreadIds?: string[]
   // Absolute path to the current index.html on disk (worker lane seed hint).
   htmlPath?: string
-  // Project directory from the artifact origin (worker lane). Worker
-  // sessions spawn there so the duty can read the originating repo.
+  // Project directory for the duty. Sessions spawn there so duties can
+  // read the repo that produced the artifact.
   cwd?: string
 }
 
@@ -37,11 +35,9 @@ export type DutyResult =
 
 export type HostAdapter = {
   readonly id: AdapterId
-  canNotifyOrigin(): boolean
   ensureSession(lane: Lane, artifactId: string, seed?: SeedSpec, cwd?: string): Promise<AgentSession>
   runDuty(session: AgentSession, input: DutyInput): Promise<DutyResult>
   discard?(session: AgentSession): Promise<void>
-  notifyOrigin?(origin: OriginRef, text: string): Promise<void>
   // Best-effort cancel of an in-flight duty: the current turn is aborted so
   // runDuty throws (or has already settled) and the lane can be failed.
   interrupt?(session: AgentSession): Promise<void> | void

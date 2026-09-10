@@ -35,15 +35,12 @@ sequenceDiagram
     H->>R: hits Iterate 🔄 (batch freezes)
     R->>R: worker agent folds the batch into v2
     R->>H: v2, fresh and improved
-    R-->>A: one-line status ping (Notify on)
     Note over A,H: repeat until 🟢 done for now, never a dead end
 ```
 
 ### 🤖🤖 The agents
 
-redline runs its own agents. The **review agent** answers your comments in the thread. The **worker agent** takes Iterate and produces the next version itself. Wire them up at `/settings` (ACP or OpenCode SDK). ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. The model field applies only to `opencode-sdk`. On ACP, bake model flags into a custom command.
-
-With **Notify** on, the server drops a one-line status into the OpenCode session that created the artifact after each duty (`replied to 2 thread(s)…`, `published v3 of…`, `v3 approved. Done for now.`). Status only. One line. Never a thread dump.
+redline runs its own agents. The **review agent** answers your comments in the thread. The **worker agent** takes Iterate and produces the next version itself. Wire them up at `/settings` — every lane is ACP. Presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. ACP has no portable model flag, so bake model choices into a custom command.
 
 ## ⚡ Quick start
 
@@ -60,22 +57,6 @@ Then ask your agent something like:
 > Redline a dashboard mockup for our billing settings page.
 
 The skill bootstraps the daemon on first use. Skill updates: `npx skills update`.
-
-### pi
-
-```bash
-pi install git:github.com/codenamegary/redline
-```
-
-Reload pi (`/reload`). First tool call starts the daemon.
-
-### OpenCode
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/codenamegary/redline/main/install.sh | bash -s -- --with-opencode
-```
-
-Restart OpenCode sessions. First tool call starts the daemon.
 
 ### Daemon only
 
@@ -109,9 +90,9 @@ Each tarball unpacks to a `redline-<version>-<platform>/` directory containing t
 - 📌 **Pin comments on anything.** Headings, paragraphs, diagrams, tables, buttons, whole embedded UIs. If HTML can render it, you can redline it. That means *everything*.
 - 💬 **Threads, not sticky notes.** Replies, resolve/reopen, and `author: "user" | "agent"`. Your agent can answer your questions *in the thread* before touching the document. Comment while the agent is attached and it instantly shows a 🌀 *thinking…* placeholder, then its real answer. Like a coworker who's suspiciously fast and never sighs.
 - 🕰️ **History is sacred.** Every revision kept. Every version is the record of one iteration: the batch of threads it addressed, when it was published, when you approved it. Every thread records the version it was pinned on (`anchorVersion`) and the version that resolved it (`resolvedInVersion`). Old pins stay visible. The UI badges them so nothing gaslights you.
-- ⚡ **A loop that runs itself. Your chat stays free.** The review agent answers your comments in the thread. The worker agent takes Iterate and produces the next version. Approve and both agents step back (done for now). The server enforces the split: publishing outside `iterating` is a 409, so live replies are always consequence-free. With Notify on, the origin session gets a one-line status after each duty. No cron. No refresh spam. No "checking if the agent saw my feedback" anxiety spiral.
+- ⚡ **A loop that runs itself. Your chat stays free.** The review agent answers your comments in the thread. The worker agent takes Iterate and produces the next version. Approve and both agents step back (done for now). The server enforces the split: publishing outside `iterating` is a 409, so live replies are always consequence-free. No cron. No refresh spam. No "checking if the agent saw my feedback" anxiety spiral.
 - 🗂️ **The filesystem is the database.** Plain JSON + HTML under `~/.redline`. No migrations, no volumes, no vendor. `grep` your own feedback. `diff` two versions. Back it up with `cp`. Radical, we know.
-- 🔌 **Any harness, any agent.** Claude Code / Cursor / Antigravity via the skill. Cursor Agent also works as an ACP preset at `/settings`. Native tools for pi and OpenCode. Or raw HTTP. Eighteen endpoints. `curl` works too.
+- 🔌 **Any harness, any agent.** Claude Code / Cursor / Antigravity via the skill. Cursor Agent also works as an ACP preset at `/settings`. Or raw HTTP. Eighteen endpoints. `curl` works too.
 - 🏠 **Localhost or nothing.** No cloud. No accounts. No telemetry. No "workspace". Your design docs never leave your disk, which is where your stuff lived before anyone decided it shouldn't.
 
 ## 📁 On disk
@@ -119,9 +100,8 @@ Each tarball unpacks to a `redline-<version>-<platform>/` directory containing t
 ```
 ~/.redline/
 ├── server.log                      # daemon output
-├── settings.json                   # review agent, worker agent, notify (edit via /settings)
+├── settings.json                   # review agent, worker agent (edit via /settings)
 ├── bin/redline                     # prebuilt daemon binary (binary installs)
-├── app/                            # source checkout (only for pi/opencode wiring)
 └── artifacts/
     └── 2026-01-15-143205-dashboard/
         ├── meta.json               # title, prompt, status, version ledger
@@ -141,9 +121,9 @@ Standards: Richardson Level 2, camelCase JSON, ISO 8601 UTC timestamps, RFC 7807
 |--------|------|---------|
 | GET | `/api/v1/health` | liveness + home path |
 | GET | `/api/v1/artifacts` | list summaries (status, versions, open threads, review URL) |
-| POST | `/api/v1/artifacts` | create with `{title, html, prompt?, note?, origin?}` → 201 + Location, status `review` |
+| POST | `/api/v1/artifacts` | create with `{title, html, prompt?, note?}` → 201 + Location, status `review` |
 | GET | `/api/v1/artifacts/:id` | detail incl. prompt, `iteratedAt`, and the version ledger |
-| GET | `/api/v1/artifacts/:id/worker` | debug: configured vs live review and worker agents, plus stored `origin` |
+| GET | `/api/v1/artifacts/:id/worker` | debug: configured vs live review and worker agents |
 | POST | `/api/v1/artifacts/:id/iterations` | hit Iterate: freezes open threads into a pending version, status `iterating` (409 unless `review`, 422 with nothing open) |
 | POST | `/api/v1/artifacts/:id/versions` | publish the pending iteration `{html, note?}` → becomes current, status `review` (409 unless `iterating`) |
 | POST | `/api/v1/artifacts/:id/versions/:version/approve` | done for now: stamps `approvedAt` on the current version (409 while iterating) |
@@ -155,22 +135,20 @@ Standards: Richardson Level 2, camelCase JSON, ISO 8601 UTC timestamps, RFC 7807
 | PATCH | `/api/v1/artifacts/:id/threads/:threadId` | `{status}`: `open` or `resolved` (409 while iterating) |
 | GET | `/api/v1/settings` | effective agent config (`reviewer`, `worker`) and prompt templates |
 | PUT | `/api/v1/settings` | save settings. Probes every configured agent first, 400 problem+json with detail on failure |
-| POST | `/api/v1/settings/probe` | test one agent `{lane, adapter, acpCommand}` (422 with detail on failure) |
+| POST | `/api/v1/settings/probe` | test one agent `{lane, acpCommand}` (422 with detail on failure) |
 | POST | `/api/v1/settings/prompts/reset` | restore the shipped prompt templates, returns effective settings |
 | GET | `/api/v1/settings/defaults` | the shipped prompt templates |
-
-The create body takes an optional `origin` `{host, sessionId, serverUrl?}`. The plugins send it automatically. With Notify on (see `/settings`), the server posts a one-line status into that session after a duty (replies, publishes, worker failures, approvals). Only the OpenCode SDK adapter can notify today, and only when the artifact has an origin.
 
 Pages (not part of the JSON API):
 
 | Path | Purpose |
 |------|---------|
 | `/` | gallery of all artifacts |
-| `/settings` | review agent, worker agent, and notify |
+| `/settings` | review agent and worker agent |
 | `/a/:id` | review shell (feedback sidebar + iframe) |
 | `/a/:id/:version/*` | raw artifact files. `current` resolves to the latest version |
 
-Threads are artifact-scoped even though they're stored per version. Open threads surface first no matter which version they were pinned on. `?version=vN` filters to a specific version's pins. Messages carry a `kind`: `text` or `thinking`. `thinking` is the server-synthesized placeholder the agent replaces with its real answer (the only editable message). The worker agent also posts ordinary agent `text` notes on batch threads (`Working on this for vN.`, `Addressed in vN.`, `Worker failed: …`). Those are status, not new pins. The loop's statuses are server-owned: `draft`, `review`, `iterating`. Approval is not one of them. It's an `approvedAt` stamp on a version row, alongside the frozen `batch` of thread ids that iteration addressed. Artifacts should be single-file HTML: the Tailwind CDN script plus inline CSS and JS, stable `id` attributes on major sections so pins survive revisions. The skill teaches your agent all of this, so ideally you never have to think about it. 😌
+Threads are artifact-scoped even though they're stored per version. Open threads surface first no matter which version they were pinned on. `?version=vN` filters to a specific version's pins. Messages carry a `kind`: `text` or `thinking`. `thinking` is the server-synthesized placeholder the agent replaces with its real answer (the only editable message). The worker agent also posts ordinary agent `text` notes on batch threads (`Working on this for vN.`, `Addressed in vN.`, `Iteration failed: …`). Those are status, not new pins. The loop's statuses are server-owned: `draft`, `review`, `iterating`. Approval is not one of them. It's an `approvedAt` stamp on a version row, alongside the frozen `batch` of thread ids that iteration addressed. Artifacts should be single-file HTML: the Tailwind CDN script plus inline CSS and JS, stable `id` attributes on major sections so pins survive revisions. The skill teaches your agent all of this, so you never have to think about it. 😌
 
 ## 🧭 Principles
 
@@ -192,7 +170,6 @@ The repo is a bun workspace monorepo:
 
 ```bash
 git clone https://github.com/codenamegary/redline.git && cd redline
-bash install.sh --from-source --with-pi --with-opencode   # optional harness wiring
 bun install
 bun run dev           # API on :4738 + Vite dev server on :4739 (proxies /api and artifact files)
 bun run check         # lint + typecheck + test across all workspaces

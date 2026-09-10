@@ -129,19 +129,6 @@ export const ArtifactIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,118}$/)
 
 export type ArtifactId = z.infer<typeof ArtifactIdSchema>
 
-// Where the create request came from (host plugin session). Stored on the
-// artifact so origin notifications can find their way home. cwd records the
-// project directory at create time; worker sessions spawn there so duties
-// can read the repo that produced the artifact (read-only).
-export const OriginRefSchema = z.object({
-  host: z.string().min(1),
-  sessionId: z.string().min(1),
-  serverUrl: z.string().optional(),
-  cwd: z.string().min(1).optional(),
-})
-
-export type OriginRef = z.infer<typeof OriginRefSchema>
-
 export const ArtifactMetaSchema = z.object({
   id: ArtifactIdSchema,
   title: z.string().min(1).max(200),
@@ -156,7 +143,6 @@ export const ArtifactMetaSchema = z.object({
   iteratedAt: IsoTimestampSchema.nullish(),
   current: VersionSchema,
   versions: z.array(ArtifactVersionSchema).min(1),
-  origin: OriginRefSchema.optional(),
 })
 
 export type ArtifactMeta = z.infer<typeof ArtifactMetaSchema>

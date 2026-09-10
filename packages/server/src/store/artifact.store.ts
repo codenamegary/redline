@@ -12,7 +12,6 @@ import {
   FeedbackDoc,
   FeedbackDocSchema,
   MessageKind,
-  OriginRef,
   Thread,
   ThreadMessage,
   ThreadStatus,
@@ -187,7 +186,6 @@ export type CreateArtifactInput = {
   prompt: string
   html: string
   note?: string
-  origin?: OriginRef
 }
 
 export const createArtifact = async (store: Store, input: CreateArtifactInput): Promise<ArtifactMeta> => {
@@ -202,7 +200,6 @@ export const createArtifact = async (store: Store, input: CreateArtifactInput): 
     updatedAt: now,
     current: "v1",
     versions: [{ version: VersionSchema.parse("v1"), createdAt: now, publishedAt: now, note: input.note }],
-    origin: input.origin,
   }
   await mkdir(artifactDir(store, id), { recursive: true })
   await writeFile(artifactVersionFile(store, id, "v1"), input.html, "utf8")

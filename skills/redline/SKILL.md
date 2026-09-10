@@ -9,11 +9,11 @@ redline serves HTML artifacts in a browser shell where the user pins comments, a
 
 ## The loop contract
 
-The review loop runs inside redline, not in your session. Two lanes: a reviewer answers comments in threads, and a worker publishes on Iterate. Each lane has its own adapter (`acp`, `opencode-sdk`, or `none`), preset, command, model, and prompt template. The reviewer fills thinking placeholders, and a fresh worker session gets the current version's file path under `~/.redline`, returns the next document, and the server publishes it. While that runs, batch threads get agent notes: `Working on this for vN.` on claim, `Addressed in vN.` plus the publish note on success, `Worker failed: …` on error (artifact stays iterating). Those notes are status, not new user pins. Approve unbinds both lanes and still means done for now.
+The review loop runs inside redline, not in your session. Two lanes: a reviewer answers comments in threads, and a worker publishes on Iterate. Each lane has its own adapter (`acp` or `none`), preset, command, and prompt template. The reviewer fills thinking placeholders, and a fresh worker session gets the current version's file path under `~/.redline`, returns the next document, and the server publishes it. While that runs, batch threads get agent notes: `Working on this for vN.` on claim, `Addressed in vN.` plus the publish note on success, `Iteration failed: …` on error (the artifact rolls back to review with every thread still open). Those notes are status, not new user pins. Approve unbinds both lanes and still means done for now.
 
-Your job: create the artifact, give the user the review URL, stop. You never wait for feedback, reply in threads, or publish — redline owns all three. With Notify on, the server posts a one-line status into an OpenCode origin session after each duty (replies, publishes, worker failures, approvals). That ping is status only; it never asks you to reply, publish, or wait.
+Your job: create the artifact, give the user the review URL, stop. You never wait for feedback, reply in threads, or publish — redline owns all three.
 
-If the user explicitly asks you to read feedback or publish a new version, `get_feedback` and `update_artifact` are there for that. That is a direct request, not the review loop.
+If the user explicitly asks you to read feedback or publish a new version, `GET /api/v1/artifacts/:id/feedback` and `POST /api/v1/artifacts/:id/versions` are there for that.
 
 ## Workflow
 
@@ -29,9 +29,9 @@ Stage HTML only inside the current workspace. Never write HTML to `/tmp`, `$TMPD
    - For architecture: label every box and edge, add a legend, and put trade-off prose next to the diagram.
    - Start with a header: title plus a one-paragraph summary of the decision or idea.
 3. Write the document to `.redline-drafts/<short-slug>.html` in the current workspace. Use the Write tool. Do not use `mktemp`, `/tmp`, or a path outside the workspace.
-4. Read the draft. Call `create_artifact` with the file contents as `html`. Pass the string, not a path. The tool returns the review URL. If the document references generated images, upload them now (see Images & static assets) before sharing the URL. Same rule for `update_artifact` when the user asked you to publish: upload assets for the pending version first, then publish.
+4. Read the draft. POST it to the server as `html` (see HTTP endpoints below). Pass the file contents as the string, not a path. The response includes the review URL. If the document references generated images, upload them now (see Images & static assets) before sharing the URL. Same rule when the user asked you to publish a pending iteration: upload assets for the pending version first, then publish.
 5. Delete the draft files. Remove `.redline-drafts/` if it is empty. Do not commit the drafts.
-6. Share the URL, say what to look at, and stop. The response text confirms this whether or not a reviewer lane is configured.
+6. Share the URL, say what to look at, and stop.
 
 ## Base skeleton (Tailwind via CDN)
 
@@ -71,15 +71,17 @@ Start every artifact from this skeleton. Tailwind's browser build compiles utili
 
 These classes are a menu, not a framework. Copy only the ones you use; delete or restyle the rest. Define your own component classes in the same block whenever markup repeats — name them however you like, the `rl-` prefix is convention only. Any utility composes with or overrides a component class (`class="rl-card p-10"`). Theme tokens exist so one value re-skins the whole artifact; pick accent colors that fit the content. Everything Tailwind offers is available: the skeleton is a starting point, never a constraint.
 
-## Tools
+## HTTP endpoints
 
-| Tool | Purpose |
+The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLINE_PORT`). Base URL below is `http://127.0.0.1:4739`.
+
+| Endpoint | Purpose |
 |------|---------|
-| `create_artifact` | `{title, html, prompt?, note?}` returns the review URL. Share it and stop |
-| `update_artifact` | `{artifactId, html, note?}` publishes the pending iteration (409 unless iterating), status returns to review. Only on an explicit user ask |
-| `upload_artifact_asset` | `{artifactId, version, filename, contentBase64}` attaches a static image to one version (5 MB max). Upload before the HTML that references it |
-| `get_feedback` | `{artifactId, version?}` threads, presence, pending iteration, right now. Only on an explicit user ask |
-| `list_artifacts` | all artifacts with open thread counts |
+| `POST /api/v1/artifacts` | `{title, html, prompt?, note?}` → 201 with a summary incl. `reviewUrl`. Share it and stop |
+| `POST /api/v1/artifacts/:id/versions` | `{html, note?}` publishes the pending iteration (409 unless iterating), status returns to review |
+| `POST /api/v1/artifacts/:id/assets` | `{version, filename, data}` (base64) attaches a static image to one version (5 MB max). Upload before the HTML that references it |
+| `GET /api/v1/artifacts/:id/feedback` | threads, presence, pending iteration. `?version=vN` filters to one version |
+| `GET /api/v1/artifacts` | all artifacts with open thread counts |
 
 ## Images & static assets
 
@@ -89,7 +91,7 @@ If you can generate images (an image tool or model is available to you) and the 
 
 1. Check that image generation is wanted: `GET /api/v1/settings` and read `imageGen`. When `enabled` is false, generate only if the user asked for images directly. `agent` and `model` say what the human configured, if anything.
 2. Generate into `.redline-drafts/` in the current workspace, same staging rules as HTML. Never `/tmp`.
-3. Upload each file to the target version — `upload_artifact_asset {artifactId, version, filename, contentBase64}`. `version` is `v1` for a fresh create, or the pending version from `get_feedback` when publishing an iteration.
+3. Upload each file to the target version — `POST /api/v1/artifacts/:id/assets` with `{version, filename, data}` (base64 contents). `version` is `v1` for a fresh create, or the pending version from the feedback view when publishing an iteration.
 4. Reference the file with a relative path: `<img src="hero.png">`. Never absolute paths, `file://`, or remote URLs.
 5. Delete the draft after the upload succeeds.
 
@@ -97,13 +99,13 @@ Rules: png, jpg, jpeg, gif, webp, svg, avif. 5 MB per file. One filename per ver
 
 ## Server settings
 
-Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, Notify, and Image Gen tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is probably `none`. The Image Gen tab is config-only: an on/off toggle plus the agent and model the human uses for image generation; redline never spawns it.
+Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, and Image Gen tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is `none`. The Image Gen tab is config-only: an on/off toggle plus the agent and model the human uses for image generation; redline never spawns it.
 
-Two limits worth knowing. ACP has no portable model flag, so the per-lane model only applies to the `opencode-sdk` adapter (on ACP, bake model flags into a custom command). Notify needs an `opencode-sdk` lane and an origin with `host: "opencode"` captured at create time. `GET /api/v1/artifacts/:id/worker` is debug only (configured vs live lanes, origin). Do not use it in the review loop.
+One limit worth knowing. ACP has no portable model flag, so bake model choices into a custom command. `GET /api/v1/artifacts/:id/worker` is debug only (configured vs live lanes). Do not use it in the review loop.
 
 ## Bootstrap (server not running yet)
 
-pi and OpenCode tools start the daemon on first call. Without those tools (Claude Code, Cursor, Antigravity, skill-only installs), bootstrap yourself. No human needed:
+Bootstrap the daemon yourself. No human needed:
 
 1. Ensure a running daemon (idempotent, safe to re-run). Fetch the installer straight from main — no repo clone, no local copy to go stale:
 
@@ -113,21 +115,19 @@ pi and OpenCode tools start the daemon on first call. Without those tools (Claud
 
    Downloads the prebuilt release binary into `~/.redline/bin` when needed (only curl + tar + a sha256 tool required — no bun, node, or deps), starts or restarts the daemon after an update, and waits for health. Logs: `~/.redline/server.log`.
 
-2. Only these flows need a repo checkout at `~/.redline/app` (clone or set `REDLINE_APP` to an existing one):
+2. Only `--from-source` (running the daemon from a checkout instead of the binary) needs a repo checkout at `~/.redline/app` (clone or set `REDLINE_APP` to an existing one):
 
    ```bash
    [ -f ~/.redline/app/install.sh ] || git clone --depth 1 https://github.com/codenamegary/redline.git ~/.redline/app
    ```
 
-   - `--from-source` runs the daemon from the checkout instead of the binary (needs bun or node 22+).
-   - `--with-pi` / `--with-opencode` wire the extension and plugin, which live in the repo.
-   - In source mode, `--ensure-daemon` pulls the checkout to latest before starting.
+   In source mode, `--ensure-daemon` pulls the checkout to latest before starting.
 
-   If you are inside a full checkout (it contains `install.sh` and `packages/server/src/main.ts`), you may use that directory instead and set `REDLINE_APP` to it.
+   Inside a full checkout (it contains `install.sh` and `packages/server/src/main.ts`)? Use that directory and set `REDLINE_APP` to it.
 
 Skill text updates come from the skills CLI (`npx skills update`). Do not ask the user to run update commands.
 
-## Without native tools
+## Curl quick reference
 
 The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLINE_PORT`). To check it, probe `/api/v1/health`. If nothing answers, bootstrap it (above).
 
