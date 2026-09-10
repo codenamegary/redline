@@ -5,9 +5,6 @@
   "type": "module",
   "license": "MIT",
   "packageManager": "bun@1.4.2",
-  "keywords": [
-    "pi-package"
-  ],
   "engines": {
     "node": ">=22"
   },
@@ -20,14 +17,6 @@
     "skills",
     "install.sh"
   ],
-  "pi": {
-    "extensions": [
-      "./src/pi/redline.extension.ts"
-    ],
-    "skills": [
-      "../../skills"
-    ]
-  },
   "scripts": {
     "dev": "REDLINE_PORT=4738 bun run src/main.ts serve",
     "serve": "bun run src/main.ts serve",
@@ -42,8 +31,6 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^0.84.4",
-    "@opencode-ai/plugin": "1.18.16",
     "@types/bun": "^1.4.0",
     "oxlint": "^1.80.0",
     "oxlint-tsgolint": "^7.0.2001",
