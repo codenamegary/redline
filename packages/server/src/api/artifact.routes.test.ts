@@ -514,6 +514,15 @@ describe("artifact api", () => {
     expect(viewBody.versions[1]?.note).toBe("footer added")
     expect(viewBody.versions[1]?.approvedAt).toBeDefined()
     expect(viewBody.versions[1]?.batch?.threadIds).toEqual([thread.id])
+
+    // The gallery list carries the same approval data so cards show
+    // "approved" instead of a permanent "in review".
+    const listedAfterApprove = await app.inject({ method: "GET", url: "/api/v1/artifacts" })
+    const listedRow = z
+      .object({ id: z.string(), status: z.string(), approvedAt: z.string().optional() })
+      .parse(listedAfterApprove.json().find((row: { id: string }) => row.id === created.id))
+    expect(listedRow.status).toBe("review")
+    expect(listedRow.approvedAt).toBeDefined()
   })
 
   it("keeps threads visible across versions with pinned-on and resolved-in markers", async () => {

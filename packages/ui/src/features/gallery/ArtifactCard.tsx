@@ -15,7 +15,7 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ item }) => {
         <Link to={"/a/" + item.id} className="text-[15px] font-semibold text-fog no-underline hover:text-white">
           {item.title}
         </Link>
-        <StatusBadge status={item.status} />
+        <StatusBadge status={item.status} approved={item.approvedAt !== undefined} />
       </div>
       <div className="mt-0.5 text-xs text-mist">
         {item.id} · {item.current} · {countLabel(item.versionCount, "version")}

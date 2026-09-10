@@ -100,6 +100,9 @@ export const ArtifactSummarySchema = z.object({
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
   current: VersionSchema,
+  // Approval is data on the current version, not a status: absent until the
+  // user approves the version the summary points at.
+  approvedAt: IsoTimestampSchema.optional(),
   versionCount: z.number(),
   openThreads: z.number(),
   reviewUrl: z.string(),
