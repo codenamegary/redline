@@ -119,7 +119,6 @@ const summarizeArtifact = async (
     createdAt: meta.createdAt,
     updatedAt: meta.updatedAt,
     current: meta.current,
-    approvedAt: meta.versions.find((row) => row.version === meta.current)?.approvedAt,
     versionCount: meta.versions.length,
     openThreads: await countOpenThreads(store, meta.id),
     reviewUrl: origin + "/a/" + meta.id,
