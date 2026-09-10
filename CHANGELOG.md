@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/codenamegary/redline/compare/v0.7.0...v1.0.0) (2026-09-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* the pi extension and opencode plugin no longer ship.
+
+### Code Refactoring
+
+* remove host plugins, Notify, origin, and the opencode-sdk lane adapter ([#47](https://github.com/codenamegary/redline/issues/47)) ([585ff91](https://github.com/codenamegary/redline/commit/585ff910a9b4595d614f2600ac06b9cebc703df0))
+
 ## [0.7.0](https://github.com/codenamegary/redline/compare/v0.6.0...v0.7.0) (2026-09-10)
 
 
