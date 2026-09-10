@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/codenamegary/redline/compare/v0.5.5...v0.6.0) (2026-09-10)
+
+
+### Features
+
+* **review:** play ding when the ding checkbox is selected ([57df28e](https://github.com/codenamegary/redline/commit/57df28e8b4052a0da94a18ce0cfb94a20a80d7a4))
+
 ## [0.5.5](https://github.com/codenamegary/redline/compare/v0.5.4...v0.5.5) (2026-09-10)
 
 
