@@ -10,6 +10,7 @@ import { FastifyInstance } from "fastify"
 import { buildServer } from "../server"
 import { openStore, readArtifactMeta } from "../store/artifact.store"
 import { workerRuntime } from "../worker/dispatcher"
+import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
 import {
   AgentSession,
   DutyInput,
@@ -135,16 +136,20 @@ describe("artifact api", () => {
 
     const detail = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id })
     expect(detail.statusCode).toBe(200)
-    const detailBody = z
+    // The detail route is what the UI parses with ArtifactMetaSchema; before
+    // iteratedAt went nullish this parse rejected never-iterated artifacts.
+    const detailBody = ArtifactMetaSchema.parse(detail.json())
+    expect(detailBody.iteratedAt).toBeNull()
+    const detailWire = z
       .object({
         prompt: z.string(),
         iteratedAt: z.unknown().nullable(),
         versions: z.array(z.object({ version: z.string(), publishedAt: z.string().optional() })),
       })
       .parse(detail.json())
-    expect(detailBody.prompt).toBe("")
-    expect(detailBody.versions[0]?.version).toBe("v1")
-    expect(detailBody.versions[0]?.publishedAt).toBeDefined()
+    expect(detailWire.prompt).toBe("")
+    expect(detailWire.versions[0]?.version).toBe("v1")
+    expect(detailWire.versions[0]?.publishedAt).toBeDefined()
   })
 
   it("rejects invalid bodies with problem details", async () => {

@@ -142,7 +142,9 @@ export const ArtifactMetaSchema = z.object({
   updatedAt: IsoTimestampSchema,
   // Last time the user hit Iterate. Separate from updatedAt so waiters can
   // tell work duty (iteratedAt moved) from reply duty (thread activity).
-  iteratedAt: IsoTimestampSchema.optional(),
+  // Null is legal on the wire: the artifact detail route emits null for
+  // artifacts that have never been iterated.
+  iteratedAt: IsoTimestampSchema.nullish(),
   current: VersionSchema,
   versions: z.array(ArtifactVersionSchema).min(1),
   origin: OriginRefSchema.optional(),
