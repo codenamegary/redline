@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/codenamegary/redline/compare/v0.6.0...v0.7.0) (2026-09-10)
+
+
+### Features
+
+* **iteration:** self-heal failed rounds, worker liveness, live session log, stop ([#45](https://github.com/codenamegary/redline/issues/45)) ([366b09c](https://github.com/codenamegary/redline/commit/366b09c1e9493c4e4378326453c1af82c1087839))
+
 ## [0.6.0](https://github.com/codenamegary/redline/compare/v0.5.5...v0.6.0) (2026-09-10)
 
 
