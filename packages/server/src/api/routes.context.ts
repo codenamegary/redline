@@ -308,10 +308,10 @@ const handleError = async (store: Store, artifactId: string, lane: Lane, detail:
   )
 }
 
-// Lane debug view for plugins: what is configured vs what is actually live,
-// plus the origin the artifact came from (null when created headless).
+// Lane debug view: what is configured vs what is actually live. Reads meta
+// so unknown artifact ids surface as 404.
 const workerStatus = async (store: Store, id: string) => {
-  const meta = await readArtifactMeta(store, id)
+  await readArtifactMeta(store, id)
   const settings = await readEffectiveSettings(store.home)
   const presence = workerRuntime.current?.presence(id)
   return {
@@ -326,7 +326,6 @@ const workerStatus = async (store: Store, id: string) => {
       running: presence?.workerRunning ?? false,
       bound: presence?.workerBound ?? false,
     },
-    origin: meta.origin ?? null,
   }
 }
 
@@ -365,15 +364,12 @@ const dispatchIteration = async (
       targets: [],
       batchThreadIds: batchThreadIds,
       htmlPath: htmlPath,
-      // Project directory captured at create time: the worker spawns there
-      // and reads the originating repo (read-only).
-      cwd: meta.origin?.cwd,
     },
     seed,
   )
   if (!bound || !enqueued) {
-    // The status already flipped, so fail the lane (notifies origin) and let
-    // the user re-Iterate or the fallback agent publish.
+    // The status already flipped, so fail the lane and let the user
+    // re-Iterate or the fallback agent publish.
     await dispatcher.fail(id, "worker", "worker lane did not bind for this iteration")
     return false
   }

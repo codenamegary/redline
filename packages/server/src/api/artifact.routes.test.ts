@@ -8,7 +8,7 @@ import { z } from "zod"
 import { FastifyInstance } from "fastify"
 
 import { buildServer } from "../server"
-import { openStore, readArtifactMeta, startIteration } from "../store/artifact.store"
+import { openStore, startIteration } from "../store/artifact.store"
 import { workerRuntime, DispatcherAdapters } from "../worker/dispatcher"
 import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
 import {
@@ -17,7 +17,6 @@ import {
   DutyResult,
   HostAdapter,
   Lane,
-  OriginRef,
   SeedSpec,
 } from "../worker/host.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "../worker/prompts"
@@ -340,7 +339,6 @@ describe("artifact api", () => {
       attached: false,
       reviewer: { adapter: "none", bound: false },
       worker: { adapter: "none", running: false, bound: false },
-      origin: null,
     })
 
     const missing = await app.inject({
@@ -868,12 +866,11 @@ describe("agent lane dispatch", () => {
   const createLaneArtifact = async (
     title: string,
     html: string,
-    origin?: OriginRef,
   ): Promise<z.infer<typeof SummarySchema>> => {
     const response = await laneApp.inject({
       method: "POST",
       url: "/api/v1/artifacts",
-      payload: { title: title, html: html, origin: origin },
+      payload: { title: title, html: html },
     })
     if (response.statusCode !== 201) throw new Error("lane fixture create failed: " + response.body)
     return SummarySchema.parse(response.json())
@@ -906,7 +903,7 @@ describe("agent lane dispatch", () => {
     expect(response.statusCode).toBe(201)
   }
 
-  it("creates with origin, persists it, and reports lane status", async () => {
+  it("creates and reports lane status", async () => {
     const response = await laneApp.inject({
       method: "POST",
       url: "/api/v1/artifacts",
@@ -914,21 +911,12 @@ describe("agent lane dispatch", () => {
         title: "Lane create",
         html: "<p>lane-a</p>",
         prompt: "make it pop",
-        origin: { host: "pi", sessionId: "sess-1", serverUrl: "http://127.0.0.1:4096", cwd: "/repo/coffee-site" },
       },
     })
     expect(response.statusCode).toBe(201)
     const summary = SummarySchema.parse(response.json())
     expect(["starting", "idle"]).toContain(summary.reviewer)
     expect(summary.worker).toBe("idle")
-
-    const meta = await readArtifactMeta(laneStore, summary.id)
-    expect(meta.origin).toEqual({
-      host: "pi",
-      sessionId: "sess-1",
-      serverUrl: "http://127.0.0.1:4096",
-      cwd: "/repo/coffee-site",
-    })
 
     await waitForBound(summary.id)
     const settled = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + summary.id })
@@ -939,10 +927,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("dispatches a reviewer duty on a comment and patches the placeholder with the reply", async () => {
-    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>", {
-      host: "opencode",
-      sessionId: "s-b",
-    })
+    const created = await createLaneArtifact("Lane reply", "<p>lane-b</p>")
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "the hero is huge")
@@ -1031,10 +1016,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("iterates with a worker: dispatches the batch with seed, then publishes the document", async () => {
-    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>", {
-      host: "opencode",
-      sessionId: "s-d",
-    })
+    const created = await createLaneArtifact("Lane iterate", "<p>lane-d v1</p>")
     await waitForBound(created.id)
 
     const thread = await createLaneThread(created.id, "add a footer")
@@ -1110,10 +1092,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("approve unbinds the lanes", async () => {
-    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>", {
-      host: "opencode",
-      sessionId: "s-g",
-    })
+    const created = await createLaneArtifact("Lane approve", "<p>lane-g v1</p>")
     await waitForBound(created.id)
 
     await createLaneThread(created.id, "polish")
@@ -1297,10 +1276,7 @@ describe("agent lane dispatch", () => {
   })
 
   it("reports the worker debug view for configured lanes", async () => {
-    const created = await createLaneArtifact("Lane debug", "<p>lane-j</p>", {
-      host: "opencode",
-      sessionId: "s-j",
-    })
+    const created = await createLaneArtifact("Lane debug", "<p>lane-j</p>")
     await waitForBound(created.id)
 
     const response = await laneApp.inject({ method: "GET", url: "/api/v1/artifacts/" + created.id + "/worker" })
@@ -1310,7 +1286,6 @@ describe("agent lane dispatch", () => {
       attached: true,
       reviewer: { adapter: "acp", bound: true },
       worker: { adapter: "acp", running: false, bound: false },
-      origin: { host: "opencode", sessionId: "s-j" },
     })
   })
 

@@ -92,9 +92,9 @@ const workContract = [
   "No markdown fences. No prose before the document or after </html>.",
 ].join("\n")
 
-// Repo context is worker-only: the cwd comes from the artifact origin. The
-// contract is read-only — the duty's only output is the returned document,
-// never changes to the project itself.
+// Repo context is worker-only today: the cwd rides in on the duty input.
+// The contract is read-only — the duty's only output is the returned
+// document, never changes to the project itself.
 const repoContext = (input: DutyInput): string => {
   if (input.cwd === undefined) return ""
   return (

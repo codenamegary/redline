@@ -4,8 +4,6 @@ export type Lane = "reviewer" | "worker"
 
 export type AdapterId = "acp" | "none"
 
-export type OriginRef = { host: string; sessionId: string; serverUrl?: string; cwd?: string }
-
 export type AgentSession = { artifactId: string; lane: Lane; hostSessionId: string }
 
 export type SeedSpec = { html: string; version: string }
@@ -26,8 +24,9 @@ export type DutyInput = {
   batchThreadIds?: string[]
   // Absolute path to the current index.html on disk (worker lane seed hint).
   htmlPath?: string
-  // Project directory from the artifact origin (worker lane). Worker
-  // sessions spawn there so the duty can read the originating repo.
+  // Project directory for the duty (worker lane today; both lanes under
+  // the workingDirectory plan). Sessions spawn there so duties can read
+  // the repo that produced the artifact.
   cwd?: string
 }
 
