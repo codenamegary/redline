@@ -57,6 +57,15 @@ describe("artifact store", () => {
     expect(stored.id).toBe(meta.id)
   })
 
+  it("reads meta.json with iteratedAt null (never iterated)", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "Fresh", prompt: "", html: "<p>v1</p>" })
+    const metaPath = join(store.artifactsDir, meta.id, "meta.json")
+    writeFileSync(metaPath, JSON.stringify({ ...meta, iteratedAt: null }))
+    const reread = await readArtifactMeta(store, meta.id)
+    expect(reread.iteratedAt).toBeNull()
+  })
+
   it("builds unique slug ids for same-titled artifacts", async () => {
     const store = makeStore()
     const input = { title: "My Mock: v2!", prompt: "", html: "<p>x</p>" }
