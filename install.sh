@@ -4,18 +4,14 @@
 #
 #   install.sh                 install the app and start the daemon, wait for health
 #   install.sh --ensure-daemon make sure the daemon is running and current.
-#                              Used by the pi/opencode tools.
+#                              Used by the redline skill's bootstrap.
 #   install.sh --update        same as ensure-daemon (updates to the latest release
 #                              when one exists; pulls the source checkout in source mode)
 #   install.sh --from-source   run the daemon from source instead of the prebuilt
 #                              release binary (needs git + bun or node 22+)
-#   install.sh --with-pi       also wire ~/.pi/agent/settings.json (extension + skill)
-#   install.sh --with-opencode also symlink the plugin + register the skill for opencode
-#
 # Binary mode (default): downloads the prebuilt release binary into $REDLINE_HOME/bin.
 # Only needs curl + tar. Source mode (running from a checkout, REDLINE_APP set,
-# or --from-source): needs git + bun (or node 22+); the pi/opencode wiring always
-# clones the source to $REDLINE_HOME/app because the extension/plugin live there.
+# or --from-source): needs git + bun (or node 22+).
 #
 # Environment:
 #   REDLINE_HOME     data home (default ~/.redline); binary lands in $REDLINE_HOME/bin
@@ -56,15 +52,11 @@ fi
 
 MODE="install"
 FROM_SOURCE=0
-WIRE_PI=0
-WIRE_OPENCODE=0
 for arg in "$@"; do
   case "$arg" in
     --ensure-daemon)  MODE="ensure-daemon" ;;
     --update)         MODE="update" ;;
     --from-source)    FROM_SOURCE=1 ;;
-    --with-pi)        WIRE_PI=1 ;;
-    --with-opencode)  WIRE_OPENCODE=1 ;;
     --help|-h)
       sed -n '2,26p' "${BASH_SOURCE[0]:-$0}" | sed 's/^# \{0,1\}//'
       exit 0
@@ -232,17 +224,6 @@ download_release() {
 
 # ---------- source checkout ----------
 
-ensure_app() {
-  if [ -f "$APP_DIR/packages/server/src/main.ts" ]; then
-    return 0
-  fi
-  have git || die "git is required to install redline (apt install git / brew install git)"
-  say "cloning redline into $APP_DIR"
-  mkdir -p "$(dirname "$APP_DIR")"
-  git clone --depth 1 "$REPO_URL" "$APP_DIR" >&2
-  [ -f "$APP_DIR/packages/server/src/main.ts" ] || die "clone succeeded but $APP_DIR/packages/server/src/main.ts is missing"
-}
-
 ensure_deps() {
   say "installing dependencies in $APP_DIR"
   (
@@ -331,87 +312,6 @@ ensure_daemon_binary() {
   say "redline ready: $(health_url) (v$(running_version))"
 }
 
-# ---------- harness wiring (needs the source checkout) ----------
-
-run_json_edit() {
-  local script="$1"; shift
-  if [ -n "$BUN" ]; then
-    "$BUN" "$script" "$@"
-  else
-    node "$script" "$@"
-  fi
-}
-
-wire_pi() {
-  say "wiring pi (~/.pi/agent/settings.json)"
-  local tmp
-  tmp="$(mktemp /tmp/redline-pi-XXXXXX.js)"
-  cat > "$tmp" <<'EOF'
-const fs = require("node:fs")
-const path = require("node:path")
-const file = process.argv[2]
-const app = process.argv[3]
-let json = {}
-try { json = JSON.parse(fs.readFileSync(file, "utf8")) } catch {}
-const extensions = new Set(json.extensions ?? [])
-const skills = new Set(json.skills ?? [])
-extensions.add(path.join(app, "packages", "server", "src", "pi", "redline.extension.ts"))
-skills.add(path.join(app, "skills", "redline"))
-json.extensions = [...extensions]
-json.skills = [...skills]
-fs.mkdirSync(path.dirname(file), { recursive: true })
-fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n")
-console.log("pi settings updated: " + file)
-EOF
-  run_json_edit "$tmp" "$HOME/.pi/agent/settings.json" "$APP_DIR"
-  rm -f "$tmp"
-  say "pi: restart it or run /reload, then try any redline tool"
-}
-
-wire_opencode() {
-  say "wiring opencode"
-  local plugin_dir plugin_target
-  plugin_dir="$HOME/.config/opencode/plugin"
-  mkdir -p "$plugin_dir"
-  plugin_target="$plugin_dir/redline.ts"
-  ln -sfn "$APP_DIR/packages/server/src/opencode/redline.plugin.ts" "$plugin_target"
-  say "plugin linked: $plugin_target -> $APP_DIR/packages/server/src/opencode/redline.plugin.ts"
-
-  if [ ! -d "$HOME/.config/opencode/node_modules/@opencode-ai/plugin" ]; then
-    say "installing @opencode-ai/plugin into ~/.config/opencode"
-    (
-      cd "$HOME/.config/opencode"
-      if [ -n "$BUN" ]; then "$BUN" add @opencode-ai/plugin >/dev/null 2>&1 || "$BUN" add @opencode-ai/plugin
-      else npm install @opencode-ai/plugin --no-audit --no-fund >/dev/null 2>&1 || npm install @opencode-ai/plugin --no-audit --no-fund; fi
-    ) || warn "could not install @opencode-ai/plugin automatically; run: cd ~/.config/opencode && npm i @opencode-ai/plugin"
-  fi
-
-  local tmp
-  tmp="$(mktemp /tmp/redline-opencode-XXXXXX.js)"
-  cat > "$tmp" <<'EOF'
-const fs = require("node:fs")
-const path = require("node:path")
-const file = process.argv[2]
-const app = process.argv[3]
-let json = {}
-const exists = fs.existsSync(file)
-try { json = exists ? JSON.parse(fs.readFileSync(file, "utf8")) : {} } catch {
-  console.log("could not parse " + file + " (comments? jsonc?) — add this manually:")
-  console.log('  "skills": { "paths": [' + JSON.stringify(path.join(app, "skills")) + '] }')
-  process.exit(0)
-}
-const paths = new Set(json.skills?.paths ?? [])
-paths.add(path.join(app, "skills"))
-json.skills = { ...(json.skills ?? {}), paths: [...paths] }
-fs.mkdirSync(path.dirname(file), { recursive: true })
-fs.writeFileSync(file, JSON.stringify(json, null, 2) + "\n")
-console.log("opencode config updated: " + file)
-EOF
-  run_json_edit "$tmp" "$HOME/.config/opencode/opencode.jsonc" "$APP_DIR"
-  rm -f "$tmp"
-  say "opencode: restart sessions to pick up the plugin and skill"
-}
-
 # ---------- main ----------
 
 # Self-heal a stale clone copy of this installer: pull the app checkout and,
@@ -451,12 +351,6 @@ case "$MODE" in
     fi
     ;;
 esac
-
-if [ "$WIRE_PI" -eq 1 ] || [ "$WIRE_OPENCODE" -eq 1 ]; then
-  ensure_app
-fi
-if [ "$WIRE_PI" -eq 1 ]; then wire_pi; fi
-if [ "$WIRE_OPENCODE" -eq 1 ]; then wire_opencode; fi
 
 if [ "$FROM_SOURCE" -eq 1 ]; then
   label="source ($(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown))"
