@@ -89,6 +89,15 @@ export const VersionBatchSchema = z.object({
   // agent's work contract for the version it will publish.
   threadIds: z.array(z.string().min(1)),
   submittedAt: IsoTimestampSchema,
+  // Host session running this iteration, stamped by the dispatcher when the
+  // duty starts. Lets the log route find the session and the UI tell a live
+  // duty from an orphan.
+  adapterId: z.string().min(1).optional(),
+  sessionId: z.string().min(1).optional(),
+  // Last liveness stamp from the running duty. A pending batch whose
+  // heartbeat is stale (and no in-process duty) is an orphan the user can
+  // stop.
+  heartbeatAt: IsoTimestampSchema.optional(),
 })
 
 export type VersionBatch = z.infer<typeof VersionBatchSchema>

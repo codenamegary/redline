@@ -6,28 +6,30 @@ import { buildLanePrompt, buildSeedContext, parseLaneResult } from "./duty.promp
 import { AgentSession, DutyInput, DutyResult, HostAdapter, Lane, SeedSpec } from "./host.adapter"
 import { isRecord } from "./util"
 
-// (#23) Workers can run long: a big iteration (whole-page rework, asset-heavy
-// publish) easily exceeds five minutes. 15 minutes is the ceiling before the
-// lane is failed and the user can re-Iterate.
-export const defaultTimeoutSeconds = 900
-// Handshakes (initialize + session/new) are fast ops; a fixed deadline keeps
-// a wedged agent from holding a spawn forever regardless of duty timeout.
+// Workers can run long: a big iteration (whole-page rework, asset-heavy
+// publish) easily exceeds five minutes. Duties have no time limit — the
+// session log shows progress and the user can stop a round explicitly.
+// Handshakes (initialize + session/new) are still bounded: a fixed deadline
+// keeps a wedged agent from holding a spawn forever.
 const handshakeTimeoutSeconds = 15
 const killGraceMs = 1000
 const stderrLimit = 4000
+// Session log ring: keep the tail so a long duty cannot grow memory.
+const logLimit = 100_000
 // ACP has no portable model selector; custom presets bake model into argv.
 const acpProtocolVersion = 1
 
 export type AcpAdapterOptions = {
   getLaneConfig: (lane: Lane) => LaneConfig | Promise<LaneConfig>
-  timeoutSeconds?: number
 }
 
 type Pending = { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void }
 
-type Connection = {  request: (method: string, params: unknown) => Promise<unknown>
+type Connection = {
+  request: (method: string, params: unknown) => Promise<unknown>
   resetChunks: () => void
   takeChunks: () => string
+  readLog: () => string
   kill: () => void
   terminate: () => Promise<void>
 }
@@ -73,6 +75,10 @@ const chunkText = (update: Record<string, unknown>): string => {
 // Permission requests are auto-denied: pick a reject option when the agent
 // offers one, else cancel the request. Anything else a server asks of the
 // client is refused so an agent can never park a turn waiting on redline.
+// Tool lines read best with a stable label; some agents omit the title.
+const toolTitle = (update: Record<string, unknown>): string =>
+  typeof update.title === "string" && update.title.length > 0 ? update.title : "tool"
+
 const denyPermission = (params: Record<string, unknown>): unknown => {
   const options = Array.isArray(params.options) ? params.options : []
   const rejectOption = options.find(
@@ -91,8 +97,15 @@ const openConnection = (argv: string[]): Connection => {
   const pending = new Map<number, Pending>()
   let nextId = 1
   let chunks = ""
+  let log = ""
   let stderrText = ""
   let exitDetail: string | undefined
+
+  // Human-readable session transcript: agent text as-is, tool activity as
+  // one line each. Tail-capped.
+  const appendLog = (text: string): void => {
+    log = (log + text).slice(-logLimit)
+  }
 
   const rejectAll = (detail: string): void => {
     exitDetail = detail
@@ -159,8 +172,27 @@ const openConnection = (argv: string[]): Connection => {
     if (method !== undefined) {
       if (method === "session/update" && isRecord(message.params)) {
         const update = message.params.update
-        if (isRecord(update) && update.sessionUpdate === "agent_message_chunk") {
-          chunks += chunkText(update)
+        if (isRecord(update)) {
+          const kind = update.sessionUpdate
+          if (kind === "agent_message_chunk") {
+            const text = chunkText(update)
+            chunks += text
+            appendLog(text)
+          } else if (kind === "agent_thought_chunk") {
+            // The agent's working narration — most of what a long duty
+            // emits before the final document.
+            appendLog(chunkText(update))
+          } else if (kind === "tool_call") {
+            appendLog("\n[tool] " + toolTitle(update) + "\n")
+          } else if (kind === "tool_call_update") {
+            // Tool output streams in as content; completed/failed get a
+            // marker line so runs read as a transcript.
+            const text = chunkText(update)
+            if (text.length > 0) appendLog(text)
+            if (update.status === "completed" || update.status === "failed") {
+              appendLog("\n[" + (update.status === "failed" ? "failed" : "done") + "] " + toolTitle(update) + "\n")
+            }
+          }
         }
       }
       return
@@ -199,6 +231,7 @@ const openConnection = (argv: string[]): Connection => {
       chunks = ""
     },
     takeChunks: () => chunks,
+    readLog: () => log,
     kill: () => {
       proc.kill("SIGTERM")
       const timer = setTimeout(() => proc.kill("SIGKILL"), killGraceMs)
@@ -242,8 +275,6 @@ type InternalSession = {
 export type AcpAdapter = HostAdapter & { discard: (session: AgentSession) => Promise<void> }
 
 export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
-  const timeoutSeconds = options.timeoutSeconds ?? defaultTimeoutSeconds
-  const dutyTimeoutMs = timeoutSeconds * 1000
   const handshakeTimeoutMs = handshakeTimeoutSeconds * 1000
   const sessions = new Map<string, InternalSession>()
   let sessionCounter = 0
@@ -322,15 +353,13 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     const base = buildLanePrompt(input)
     const prompt = seedPrefix.length > 0 ? seedPrefix + "\n\n" + base : base
     state.connection.resetChunks()
-    await withTimeout(
-      state.connection.request("session/prompt", {
-        sessionId: state.sessionId,
-        prompt: [{ type: "text", text: prompt }],
-      }),
-      dutyTimeoutMs,
-      "duty timed out after " + String(timeoutSeconds) + "s",
-      () => dropSession(session.hostSessionId),
-    )
+    // No duty timeout: the turn ends when the agent ends it, the process
+    // dies, or the user stops the round (interrupt kills the connection,
+    // which rejects the in-flight prompt request).
+    await state.connection.request("session/prompt", {
+      sessionId: state.sessionId,
+      prompt: [{ type: "text", text: prompt }],
+    })
     const raw = state.connection.takeChunks()
     return parseLaneResult(input.lane, raw)
   }
@@ -340,6 +369,13 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     canNotifyOrigin: () => false,
     ensureSession,
     runDuty,
+    interrupt: (session) => {
+      dropSession(session.hostSessionId)
+    },
+    sessionLog: (session) => {
+      const state = sessions.get(session.hostSessionId)
+      return state === undefined ? "" : state.connection.readLog()
+    },
     discard: async (session) => {
       const state = sessions.get(session.hostSessionId)
       if (state === undefined) return

@@ -18,6 +18,12 @@ export type DispatcherHandlers = {
   onReplies: (artifactId: string, items: DutyResult & { kind: "replies" }) => Promise<void> | void
   onDocument: (artifactId: string, doc: DutyResult & { kind: "document" }) => Promise<void> | void
   onError: (artifactId: string, lane: Lane, detail: string) => Promise<void> | void
+  // Liveness stamp for the pending iteration while a work duty runs. Called
+  // once with the host session when the duty starts, then on an interval.
+  onWorkerHeartbeat?: (
+    artifactId: string,
+    session?: { adapterId: string; sessionId: string },
+  ) => Promise<void> | void
 }
 
 export type DispatcherOptions = {
@@ -51,6 +57,12 @@ export type Dispatcher = {
   // Internal error path: reports and resets the lane. A reviewer crash
   // unbinds; a worker crash returns the lane to idle.
   fail: (artifactId: string, lane: Lane, detail: string) => Promise<void>
+  // Best-effort cancel of the running work duty (kills the ACP child,
+  // deletes the opencode session). False when no duty is in flight.
+  interruptWorker: (artifactId: string) => boolean
+  // Read-only session log of the running (or most recent) work duty, via
+  // the cached session. Empty when no session is cached.
+  workerLog: (artifactId: string) => Promise<string>
   // End-of-round detach, called on approve.
   unbindAll: (artifactId: string) => void
 }
@@ -71,6 +83,9 @@ type CachedSession = { adapter: HostAdapter; session: AgentSession }
 
 const canNotify = (adapter: HostAdapter): boolean =>
   adapter.canNotifyOrigin() && adapter.notifyOrigin !== undefined
+
+// How often a running work duty stamps the pending batch's heartbeat.
+const heartbeatIntervalMs = 15_000
 
 export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
   const { home, adapters, handlers } = options
@@ -194,6 +209,7 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
   const runWorkDuty = async (artifactId: string, input: DutyInput, seed?: SeedSpec): Promise<void> => {
     const runtime = runtimeFor(artifactId)
     runtime.workerRunning = true
+    let heartbeat: ReturnType<typeof setInterval> | undefined
     try {
       const adapter = await resolveAdapter("worker")
       if (adapter === undefined) {
@@ -201,6 +217,17 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
         return
       }
       const session = await ensureSession(artifactId, "worker", adapter, seed, input.cwd)
+      // Liveness: stamp the host session on the pending batch, then
+      // heartbeat while the duty runs, so the UI can tell a live round from
+      // an orphaned one.
+      await handlers.onWorkerHeartbeat?.(artifactId, {
+        adapterId: adapter.id,
+        sessionId: session.hostSessionId,
+      })
+      heartbeat = setInterval(() => {
+        void Promise.resolve(handlers.onWorkerHeartbeat?.(artifactId)).catch(() => undefined)
+      }, heartbeatIntervalMs)
+      heartbeat.unref?.()
       const result = await adapter.runDuty(session, input)
       if (result.kind !== "document") {
         await fail(artifactId, "worker", "work duty returned replies")
@@ -214,6 +241,7 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
     } catch (error) {
       await fail(artifactId, "worker", errorDetail(error))
     } finally {
+      if (heartbeat !== undefined) clearInterval(heartbeat)
       runtime.workerRunning = false
     }
   }
@@ -277,6 +305,26 @@ export const createDispatcher = (options: DispatcherOptions): Dispatcher => {
     },
 
     fail,
+
+    interruptWorker: (artifactId) => {
+      const runtime = runtimes.get(artifactId)
+      const cached = sessions.get(artifactId)?.worker
+      if (runtime?.workerRunning !== true || cached === undefined) return false
+      // The adapter kills the session; runDuty settles with an error and
+      // the normal fail path reports it.
+      void Promise.resolve(cached.adapter.interrupt?.(cached.session)).catch(() => undefined)
+      return true
+    },
+
+    workerLog: async (artifactId) => {
+      const cached = sessions.get(artifactId)?.worker
+      if (cached === undefined) return ""
+      try {
+        return (await cached.adapter.sessionLog?.(cached.session)) ?? ""
+      } catch {
+        return ""
+      }
+    },
 
     unbindAll: (artifactId) => {
       const runtime = runtimes.get(artifactId)

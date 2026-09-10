@@ -284,6 +284,57 @@ export const startIteration = async (
     return { meta: updated, version: version }
   })
 
+// Liveness + host-session stamp for the pending iteration. Written by the
+// dispatcher while a duty is in flight; a no-op when publish or rollback
+// already removed the pending row.
+export const touchIteration = async (
+  store: Store,
+  id: string,
+  session?: { adapterId: string; sessionId: string },
+): Promise<void> =>
+  withFileLock(artifactMetaPath(store, id), async () => {
+    const meta = await readArtifactMeta(store, id)
+    const pending = pendingVersion(meta)
+    const batch = pending?.batch
+    if (pending === undefined || batch === undefined) return
+    await writeArtifactMeta(store, id, {
+      ...meta,
+      versions: meta.versions.map((version) =>
+        version.version === pending.version
+          ? {
+              ...version,
+              batch: {
+                ...batch,
+                ...(session === undefined ? {} : session),
+                heartbeatAt: new Date().toISOString(),
+              },
+            }
+          : version,
+      ),
+    })
+  })
+
+// Undo a pending iteration: drop the pending row and return to review. The
+// heal path for a failed, stopped, or orphaned round — open threads stay
+// open, so no user-authored feedback is lost. Re-Iterate freezes a fresh
+// batch and reuses the version number.
+export const rollbackIteration = async (store: Store, id: string): Promise<ArtifactMeta> =>
+  withFileLock(artifactMetaPath(store, id), async () => {
+    const meta = await readArtifactMeta(store, id)
+    const pending = pendingVersion(meta)
+    if (meta.status !== "iterating" || pending === undefined) {
+      throw storeError("conflict", "no iterating round to stop")
+    }
+    const updated: ArtifactMeta = {
+      ...meta,
+      status: "review",
+      updatedAt: new Date().toISOString(),
+      versions: meta.versions.filter((version) => version.version !== pending.version),
+    }
+    await writeArtifactMeta(store, id, updated)
+    return updated
+  })
+
 // Stamp the current version approved. Approval is data, not a loop state:
 // the artifact stays in review and can always be iterated again.
 export const approveVersion = async (store: Store, id: string, version: string): Promise<ArtifactVersion> =>

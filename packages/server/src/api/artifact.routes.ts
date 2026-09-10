@@ -10,6 +10,8 @@ import { createArtifactRoute } from "./artifacts/create"
 import { getArtifactRoute } from "./artifacts/get"
 import { getWorkerRoute } from "./artifacts/worker/get"
 import { createIterationRoute } from "./artifacts/iterations/create"
+import { stopIterationRoute } from "./artifacts/iterations/stop"
+import { getIterationLogRoute } from "./artifacts/iterations/log"
 import { createVersionRoute } from "./artifacts/versions/create"
 import { approveVersionRoute } from "./artifacts/versions/approve"
 import { createAssetRoute } from "./artifacts/assets/create"
@@ -37,6 +39,8 @@ const artifactRoutes = (ctx: RoutesContext): RouteDescriptor[] => [
   getArtifactRoute(ctx),
   getWorkerRoute(ctx),
   createIterationRoute(ctx),
+  stopIterationRoute(ctx),
+  getIterationLogRoute(ctx),
   createVersionRoute(ctx),
   approveVersionRoute(ctx),
   createAssetRoute(ctx),

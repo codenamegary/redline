@@ -130,6 +130,9 @@ export const FeedbackViewSchema = z.object({
   agentAttached: z.boolean().optional(),
   reviewerAttached: z.boolean().optional(),
   workerRunning: z.boolean().optional(),
+  // True while an iteration duty is in flight with a fresh heartbeat. False
+  // (or absent) while iterating means: orphaned or wedged — offer Stop.
+  workerLive: z.boolean().optional(),
 })
 
 export type FeedbackView = z.infer<typeof FeedbackViewSchema>

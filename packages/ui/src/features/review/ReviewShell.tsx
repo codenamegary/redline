@@ -6,7 +6,8 @@ import { StatusBadge } from "../../components/StatusBadge"
 import { numberedPins, PinsOverlay } from "./PinsOverlay"
 import { PinOffset } from "./PinsOverlay"
 import { PresenceBadge } from "./PresenceBadge"
-import { useApproveMutation, useArtifactQuery, useCreateThreadMutation, useFeedbackQuery, useIterateMutation, useReplyMutation, useThreadStatusMutation } from "./queries"
+import { useApproveMutation, useArtifactQuery, useCreateThreadMutation, useFeedbackQuery, useIterateMutation, useReplyMutation, useStopIterationMutation, useThreadStatusMutation } from "./queries"
+import { SessionLogPanel } from "./SessionLogPanel"
 import { ThreadsComposer } from "./ThreadsComposer"
 import { ThreadsPanel } from "./ThreadsPanel"
 import { VersionsSelect } from "./VersionsSelect"
@@ -27,6 +28,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const view = feedbackQuery.data
 
   const iterate = useIterateMutation(id)
+  const stop = useStopIterationMutation(id)
   const approve = useApproveMutation(id)
   const createThread = useCreateThreadMutation(id)
   const reply = useReplyMutation(id)
@@ -34,6 +36,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
 
   const [selectedVersion, setSelectedVersion] = React.useState<Version | undefined>(undefined)
   const [pinMode, setPinMode] = React.useState(false)
+  const [logOpen, setLogOpen] = React.useState(false)
   const [draft, setDraft] = React.useState<ComposerDraft | undefined>(undefined)
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({})
   const [activeThreadId, setActiveThreadId] = React.useState<string | undefined>(undefined)
@@ -106,7 +109,14 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
         (pending.batch?.threadIds.length === 1 ? " thread" : " threads") +
         " in batch). Replies still reach it after this round."
       : undefined
-  const banner = iterate.isError ? iterate.error.message : iteratingBanner
+  // Stuck = iterating but the server says no worker is live: a round
+  // orphaned by a crash/restart, or a wedged duty. The server owns the
+  // clock (workerRunning + heartbeat); the client just reads it.
+  const stuck = iterating && view.workerLive !== true && !iterate.isPending
+  const stuckBanner = stuck
+    ? "The worker looks stuck or was interrupted (server restart?). Stop the round to return to review — your threads stay open."
+    : undefined
+  const banner = iterate.isError ? iterate.error.message : (stuckBanner ?? iteratingBanner)
 
   const openComposer = (next: ComposerDraft) => {
     setDraft(next)
@@ -208,7 +218,10 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
                 ? "Send open threads to the agent as one batch"
                 : "Finish the iterating round first"
           }
-          onClick={() => iterate.mutate(undefined, { onSuccess: () => setSelectedVersion(undefined) })}
+          onClick={() => iterate.mutate(undefined, { onSuccess: () => {
+            setSelectedVersion(undefined)
+            setLogOpen(false)
+          } })}
           className={
             buttonBase +
             " border-redline bg-redline font-semibold text-white disabled:border-edge-strong disabled:bg-panel disabled:text-mist"
@@ -216,6 +229,31 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
         >
           {iterate.isPending ? "Iterating…" : "Iterate"}
         </button>
+        {iterating ? (
+          <>
+            <button
+              type="button"
+              onClick={() => setLogOpen(true)}
+              title="Watch what the worker is doing"
+              className={neutralButton}
+            >
+              Log
+            </button>
+            <button
+              type="button"
+              disabled={stop.isPending}
+              title="Stop this iteration and return to review (threads stay open)"
+              onClick={() => {
+                if (window.confirm("Stop this iteration and return to review? Work in progress is discarded.")) {
+                  stop.mutate(undefined)
+                }
+              }}
+              className={buttonBase + " border-redline/40 bg-panel text-redline disabled:hover:border-redline/40"}
+            >
+              {stop.isPending ? "Stopping…" : "Stop"}
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           disabled={!review || approved || approve.isPending}
@@ -296,6 +334,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
           />
         </aside>
       </main>
+      {logOpen && iterating ? <SessionLogPanel id={id} onClose={() => setLogOpen(false)} /> : null}
     </div>
   )
 }

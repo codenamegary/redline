@@ -42,4 +42,10 @@ export type HostAdapter = {
   runDuty(session: AgentSession, input: DutyInput): Promise<DutyResult>
   discard?(session: AgentSession): Promise<void>
   notifyOrigin?(origin: OriginRef, text: string): Promise<void>
+  // Best-effort cancel of an in-flight duty: the current turn is aborted so
+  // runDuty throws (or has already settled) and the lane can be failed.
+  interrupt?(session: AgentSession): Promise<void> | void
+  // Read-only transcript of what the session has done so far. Best-effort:
+  // adapters without a log story simply omit it.
+  sessionLog?(session: AgentSession): Promise<string> | string
 }
