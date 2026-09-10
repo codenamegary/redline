@@ -175,6 +175,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
             onChange={(event) => {
               setDingOn(event.target.checked)
               setDingPreference(event.target.checked)
+              if (event.target.checked) playDing()
             }}
             className="cursor-pointer accent-redline"
           />
