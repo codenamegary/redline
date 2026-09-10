@@ -2,7 +2,7 @@ import { Thread } from "@redline/http-contracts/artifact.models"
 
 export type Lane = "reviewer" | "worker"
 
-export type AdapterId = "acp" | "opencode-sdk" | "none"
+export type AdapterId = "acp" | "none"
 
 export type OriginRef = { host: string; sessionId: string; serverUrl?: string; cwd?: string }
 
@@ -37,7 +37,6 @@ export type DutyResult =
 
 export type HostAdapter = {
   readonly id: AdapterId
-  canNotifyOrigin(): boolean
   ensureSession(lane: Lane, artifactId: string, seed?: SeedSpec, cwd?: string): Promise<AgentSession>
   runDuty(session: AgentSession, input: DutyInput): Promise<DutyResult>
   discard?(session: AgentSession): Promise<void>

@@ -84,7 +84,6 @@ const fakeAdapter = (id: AdapterId): FakeAdapter => {
 
   const adapter: HostAdapter = {
     id,
-    canNotifyOrigin: () => true,
     ensureSession: async (lane, artifactId, seed, cwd) => {
       ensureCalls.push({ lane, artifactId, seed, cwd })
       return {

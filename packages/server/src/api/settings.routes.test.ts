@@ -43,7 +43,6 @@ const lane = (acpCommand: string[]) => ({
   adapter: "acp",
   preset: "opencode",
   acpCommand: acpCommand,
-  model: "",
 })
 
 const readDisk = (home: string): RedlineSettings =>
@@ -59,11 +58,8 @@ describe("settings api", () => {
       adapter: "acp",
       preset: "opencode",
       acpCommand: ["opencode", "acp"],
-      model: "",
     })
     expect(body.worker.acpCommand).toEqual(["opencode", "acp"])
-    expect(body.notifyOrigin).toBe(true)
-    expect(body.opencodeServerUrl).toBe("http://127.0.0.1:4096")
     expect(body.imageGen).toEqual({ enabled: false, agent: "", model: "" })
     expect(body.prompts.reviewer).toBe(DEFAULT_REVIEWER_PROMPT)
     expect(body.prompts.worker).toBe(DEFAULT_WORKER_PROMPT)
@@ -96,8 +92,6 @@ describe("settings api", () => {
     expect(response.statusCode).toBe(200)
     const saved = RedlineSettingsSchema.parse(response.json())
     expect(saved.reviewer.acpCommand).toEqual(["true"])
-    expect(saved.notifyOrigin).toBe(true)
-    expect(saved.opencodeServerUrl).toBe("http://127.0.0.1:4096")
     expect(saved.prompts.reviewer).toBe("my reviewer prompt")
     // Saved, not effective: the empty prompt echoes back empty.
     expect(saved.prompts.worker).toBe("")
@@ -151,8 +145,6 @@ describe("settings api", () => {
       JSON.stringify({
         reviewer: lane(["true"]),
         worker: lane(["true"]),
-        notifyOrigin: false,
-        opencodeServerUrl: "http://127.0.0.1:4096",
         prompts: { reviewer: "", worker: "" },
       }),
     )
@@ -162,7 +154,26 @@ describe("settings api", () => {
     expect(body.imageGen).toEqual({ enabled: false, agent: "", model: "" })
     // Everything the old file did carry survives the read.
     expect(body.reviewer.acpCommand).toEqual(["true"])
-    expect(body.notifyOrigin).toBe(false)
+  })
+
+  it("coerces a settings file written before the opencode-sdk adapter was removed", async () => {
+    const { app, home } = makeApp()
+    writeFileSync(
+      settingsPath(home),
+      JSON.stringify({
+        reviewer: { adapter: "opencode-sdk", preset: "custom", acpCommand: ["gone"], model: "" },
+        worker: lane(["true"]),
+        notifyOrigin: false,
+        opencodeServerUrl: "http://127.0.0.1:4096",
+        prompts: { reviewer: "kept", worker: "" },
+      }),
+    )
+    const response = await app.inject({ method: "GET", url: "/api/v1/settings" })
+    expect(response.statusCode).toBe(200)
+    const body = RedlineSettingsSchema.parse(response.json())
+    expect(body.reviewer.adapter).toBe("none")
+    expect(body.worker.acpCommand).toEqual(["true"])
+    expect(body.prompts.reviewer).toBe("kept")
   })
 
   it("rejects unknown adapters with problem details", async () => {
@@ -203,7 +214,7 @@ describe("settings api", () => {
     const ok = await app.inject({
       method: "POST",
       url: "/api/v1/settings/probe",
-      payload: { lane: "reviewer", adapter: "acp", acpCommand: ["true"] },
+      payload: { lane: "reviewer", acpCommand: ["true"] },
     })
     expect(ok.statusCode).toBe(200)
     expect(ok.json()).toMatchObject({ ok: true })
@@ -211,7 +222,7 @@ describe("settings api", () => {
     const failing = await app.inject({
       method: "POST",
       url: "/api/v1/settings/probe",
-      payload: { lane: "worker", adapter: "acp", acpCommand: ["false"] },
+      payload: { lane: "worker", acpCommand: ["false"] },
     })
     expect(failing.statusCode).toBe(422)
     expect(failing.headers["content-type"]).toContain("application/problem+json")
@@ -222,7 +233,6 @@ describe("settings api", () => {
       url: "/api/v1/settings/probe",
       payload: {
         lane: "worker",
-        adapter: "acp",
         acpCommand: ["redline-no-such-binary-9x8y"],
       },
     })
@@ -265,7 +275,5 @@ describe("settings api", () => {
     expect(response.statusCode).toBe(200)
     const body = RedlineSettingsSchema.parse(response.json())
     expect(body.prompts.reviewer).toBe(DEFAULT_REVIEWER_PROMPT)
-    expect(body.notifyOrigin).toBe(true)
-    expect(body.opencodeServerUrl).toBe("http://127.0.0.1:4096")
   })
 })

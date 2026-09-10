@@ -25,7 +25,6 @@ import {
   workerRuntime,
 } from "../worker/dispatcher"
 import { DutyResult, Lane, SeedSpec, ThreadRef } from "../worker/host.adapter"
-import { createOpenCodeSdkAdapter } from "../worker/opencode.sdk.adapter"
 import { AcpProbe, probeAcpHandshake } from "../worker/probe"
 
 export type RouteDescriptor = {
@@ -400,10 +399,6 @@ export const installDispatcher = (store: Store, seams?: RoutesSeams): void => {
     adapters: seams?.adapters ?? {
       acp: createAcpAdapter({
         getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
-      }),
-      "opencode-sdk": createOpenCodeSdkAdapter({
-        getLaneConfig: async (lane) => (await readEffectiveSettings(store.home))[lane],
-        getServerUrl: async () => (await readEffectiveSettings(store.home)).opencodeServerUrl,
       }),
     },
     handlers: {

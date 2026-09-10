@@ -9,7 +9,7 @@ import { FastifyInstance } from "fastify"
 
 import { buildServer } from "../server"
 import { openStore, readArtifactMeta, startIteration } from "../store/artifact.store"
-import { workerRuntime } from "../worker/dispatcher"
+import { workerRuntime, DispatcherAdapters } from "../worker/dispatcher"
 import { ArtifactMetaSchema } from "@redline/http-contracts/artifact.models"
 import {
   AgentSession,
@@ -783,7 +783,6 @@ describe("agent lane dispatch", () => {
 
   const fakeAcp: HostAdapter = {
     id: "acp",
-    canNotifyOrigin: () => true,
     ensureSession: async (lane: Lane, artifactId: string, seed?: SeedSpec) => {
       recorded.seeds.push(seed)
       return { artifactId: artifactId, lane: lane, hostSessionId: "fake-1" }
@@ -802,9 +801,13 @@ describe("agent lane dispatch", () => {
     sessionLog: async () => "fake session log",
   }
 
+  // Mutable so the bind-timeout tests can pull the adapter out of the
+  // registry: a configured lane whose adapter is missing never binds.
+  const laneAdapters: DispatcherAdapters = { acp: fakeAcp }
+
   beforeAll(async () => {
     writeFileSync(join(laneHome, "settings.json"), laneSettings())
-    laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: { acp: fakeAcp } })
+    laneApp = buildServer({ store: laneStore, loggerLevel: "error", adapters: laneAdapters })
   })
 
   afterAll(async () => {
@@ -1312,10 +1315,10 @@ describe("agent lane dispatch", () => {
   })
 
   it("patches outstanding placeholders when the reviewer bind never lands", async () => {
-    // Point the reviewer at an adapter id absent from the registry: attach
-    // never binds, so a comment's dispatch waits out the bind window and
-    // must fail the lane instead of leaving the placeholder dangling.
-    writeFileSync(join(laneHome, "settings.json"), laneSettings({ reviewer: "opencode-sdk" }))
+    // Pull the adapter from the registry: attach never binds, so a
+    // comment's dispatch waits out the bind window and must fail the lane
+    // instead of leaving the placeholder dangling.
+    delete laneAdapters.acp
     try {
       const created = await createLaneArtifact("Lane bind timeout", "<p>lane-k</p>")
       expect(workerRuntime.current?.presence(created.id).reviewerBound).toBe(false)
@@ -1340,14 +1343,14 @@ describe("agent lane dispatch", () => {
       })
       await poller
     } finally {
-      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+      laneAdapters.acp = fakeAcp
     }
   })
 
   it("answers the iterate route with a distinct message when the worker lane fails to start", async () => {
-    // Worker adapter id absent from the registry: the bind window expires
+    // Worker adapter absent from the registry: the bind window expires
     // and the route fails the lane with its own conflict copy.
-    writeFileSync(join(laneHome, "settings.json"), laneSettings({ worker: "opencode-sdk" }))
+    delete laneAdapters.acp
     try {
       const created = await createLaneArtifact("Lane iterate fail", "<p>lane-l</p>")
       await createLaneThread(created.id, "will not dispatch")
@@ -1360,7 +1363,7 @@ describe("agent lane dispatch", () => {
       expect(response.statusCode).toBe(409)
       expect(response.json()).toMatchObject({ status: 409, detail: "worker lane failed to start" })
     } finally {
-      writeFileSync(join(laneHome, "settings.json"), laneSettings())
+      laneAdapters.acp = fakeAcp
     }
   })
 })

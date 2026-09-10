@@ -315,8 +315,8 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
   }
 
   // First duty on a worker session carries the document. The seed-context
-  // wording lives in duty.prompt.ts (shared with the opencode-sdk adapter);
-  // this wrapper only owns the once-per-session tracking.
+  // wording lives in duty.prompt.ts; this wrapper only owns the
+  // once-per-session tracking.
   const seedContext = async (hostSessionId: string, input: DutyInput): Promise<string> => {
     const state = sessions.get(hostSessionId)
     if (state === undefined || input.lane !== "worker" || state.seeded) return ""
@@ -366,7 +366,6 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
 
   return {
     id: "acp",
-    canNotifyOrigin: () => false,
     ensureSession,
     runDuty,
     interrupt: (session) => {

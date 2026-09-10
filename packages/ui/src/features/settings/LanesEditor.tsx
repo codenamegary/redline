@@ -13,7 +13,6 @@ export type LaneForm = {
   adapter: LaneAdapter
   preset: LanePreset
   command: string
-  model: string
 }
 
 export type LanesEditorProps = {
@@ -27,7 +26,6 @@ export type LanesEditorProps = {
 
 const adapterOptions: Array<{ value: LaneAdapter; label: string }> = [
   { value: "acp", label: "ACP" },
-  { value: "opencode-sdk", label: "OpenCode SDK" },
   { value: "none", label: "None (wait in the agent)" },
 ]
 
@@ -99,19 +97,6 @@ export const LanesEditor: React.FC<LanesEditorProps> = ({
           className={inputClass}
         />
       </label>
-      <label className="flex flex-col gap-1 text-xs text-mist">
-        Model
-        <input
-          type="text"
-          value={form.model}
-          disabled={disabled}
-          placeholder="leave empty for the agent default"
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(event) => onChange({ model: event.target.value })}
-          className={inputClass}
-        />
-      </label>
       {form.adapter === "acp" ? (
         <div className="flex items-center gap-2">
           <button
@@ -124,11 +109,7 @@ export const LanesEditor: React.FC<LanesEditorProps> = ({
           </button>
         </div>
       ) : (
-        <p className="m-0 text-xs text-mist">
-          {form.adapter === "opencode-sdk"
-            ? "OpenCode SDK lanes are validated on save."
-            : "None needs no validation."}
-        </p>
+        <p className="m-0 text-xs text-mist">None needs no validation.</p>
       )}
     </div>
   )
