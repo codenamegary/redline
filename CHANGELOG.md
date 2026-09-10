@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.5](https://github.com/codenamegary/redline/compare/v0.5.4...v0.5.5) (2026-09-10)
+
+
+### Bug Fixes
+
+* **contracts:** accept null for iteratedAt ([#42](https://github.com/codenamegary/redline/issues/42)) ([6a1dabc](https://github.com/codenamegary/redline/commit/6a1dabc5ec5dbea09f0c8616566fee42004e606c))
+
 ## [0.5.4](https://github.com/codenamegary/redline/compare/v0.5.3...v0.5.4) (2026-09-09)
 
 
