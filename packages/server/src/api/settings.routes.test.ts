@@ -156,26 +156,6 @@ describe("settings api", () => {
     expect(body.reviewer.acpCommand).toEqual(["true"])
   })
 
-  it("coerces a settings file written before the opencode-sdk adapter was removed", async () => {
-    const { app, home } = makeApp()
-    writeFileSync(
-      settingsPath(home),
-      JSON.stringify({
-        reviewer: { adapter: "opencode-sdk", preset: "custom", acpCommand: ["gone"], model: "" },
-        worker: lane(["true"]),
-        notifyOrigin: false,
-        opencodeServerUrl: "http://127.0.0.1:4096",
-        prompts: { reviewer: "kept", worker: "" },
-      }),
-    )
-    const response = await app.inject({ method: "GET", url: "/api/v1/settings" })
-    expect(response.statusCode).toBe(200)
-    const body = RedlineSettingsSchema.parse(response.json())
-    expect(body.reviewer.adapter).toBe("none")
-    expect(body.worker.acpCommand).toEqual(["true"])
-    expect(body.prompts.reviewer).toBe("kept")
-  })
-
   it("rejects unknown adapters with problem details", async () => {
     const { app } = makeApp()
     const response = await app.inject({

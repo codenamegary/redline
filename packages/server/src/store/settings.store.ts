@@ -30,24 +30,6 @@ export const defaultSettings = (): RedlineSettings => {
   })
 }
 
-// Settings written before the opencode-sdk adapter was removed carry
-// adapter: "opencode-sdk", which no longer parses. Coerce dead adapter ids
-// to "none" so the rest of the file (lanes, prompts, imageGen) survives.
-const coerceLegacyAdapters = (value: unknown): unknown => {
-  if (typeof value !== "object" || value === null) return value
-  const record = value as Record<string, unknown>
-  const lanes = ["reviewer", "worker"]
-    .map((lane) => [lane, record[lane]] as const)
-    .filter((entry): entry is [string, Record<string, unknown>] => typeof entry[1] === "object" && entry[1] !== null)
-  if (lanes.length === 0) return value
-  const migrated = { ...record }
-  for (const [lane, config] of lanes) {
-    if (config.adapter !== "opencode-sdk") continue
-    migrated[lane] = { ...config, adapter: "none" }
-  }
-  return migrated
-}
-
 // Missing or corrupt settings fall back to defaults: the server must come up
 // serving defaults even when the file was hand-edited into garbage.
 export const loadSettings = async (home: string): Promise<RedlineSettings> => {
@@ -59,7 +41,7 @@ export const loadSettings = async (home: string): Promise<RedlineSettings> => {
     throw error
   }
   try {
-    return RedlineSettingsSchema.parse(coerceLegacyAdapters(JSON.parse(raw)))
+    return RedlineSettingsSchema.parse(JSON.parse(raw))
   } catch {
     return defaultSettings()
   }

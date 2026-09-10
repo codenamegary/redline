@@ -24,9 +24,8 @@ export type DutyInput = {
   batchThreadIds?: string[]
   // Absolute path to the current index.html on disk (worker lane seed hint).
   htmlPath?: string
-  // Project directory for the duty (worker lane today; both lanes under
-  // the workingDirectory plan). Sessions spawn there so duties can read
-  // the repo that produced the artifact.
+  // Project directory for the duty. Sessions spawn there so duties can
+  // read the repo that produced the artifact.
   cwd?: string
 }
 

@@ -13,7 +13,7 @@ The review loop runs inside redline, not in your session. Two lanes: a reviewer 
 
 Your job: create the artifact, give the user the review URL, stop. You never wait for feedback, reply in threads, or publish — redline owns all three.
 
-If the user explicitly asks you to read feedback or publish a new version, `GET /api/v1/artifacts/:id/feedback` and `POST /api/v1/artifacts/:id/versions` are there for that. That is a direct request, not the review loop.
+If the user explicitly asks you to read feedback or publish a new version, `GET /api/v1/artifacts/:id/feedback` and `POST /api/v1/artifacts/:id/versions` are there for that.
 
 ## Workflow
 
@@ -78,9 +78,9 @@ The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLIN
 | Endpoint | Purpose |
 |------|---------|
 | `POST /api/v1/artifacts` | `{title, html, prompt?, note?}` → 201 with a summary incl. `reviewUrl`. Share it and stop |
-| `POST /api/v1/artifacts/:id/versions` | `{html, note?}` publishes the pending iteration (409 unless iterating), status returns to review. Only on an explicit user ask |
+| `POST /api/v1/artifacts/:id/versions` | `{html, note?}` publishes the pending iteration (409 unless iterating), status returns to review |
 | `POST /api/v1/artifacts/:id/assets` | `{version, filename, data}` (base64) attaches a static image to one version (5 MB max). Upload before the HTML that references it |
-| `GET /api/v1/artifacts/:id/feedback` | threads, presence, pending iteration, right now. `?version=vN` filters. Only on an explicit user ask |
+| `GET /api/v1/artifacts/:id/feedback` | threads, presence, pending iteration. `?version=vN` filters to one version |
 | `GET /api/v1/artifacts` | all artifacts with open thread counts |
 
 ## Images & static assets
@@ -99,7 +99,7 @@ Rules: png, jpg, jpeg, gif, webp, svg, avif. 5 MB per file. One filename per ver
 
 ## Server settings
 
-Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, and Image Gen tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is probably `none`. The Image Gen tab is config-only: an on/off toggle plus the agent and model the human uses for image generation; redline never spawns it.
+Lanes live at `/settings` in the review UI (linked from the gallery header). Reviewer, Worker, and Image Gen tabs. The preset dropdown fills the command box. ACP presets: OpenCode, Cursor Agent (`~/.local/bin/agent acp`), Claude Code, Gemini, Codex. Each ACP lane has a Test button (an ACP handshake probe) and a template reset. Save probes every configured lane and rejects the save with failure detail. Settings apply live, no restart. Never edit `~/.redline/settings.json` by hand. If the user reports that nothing answers their pins, point them at `/settings` — the reviewer lane is `none`. The Image Gen tab is config-only: an on/off toggle plus the agent and model the human uses for image generation; redline never spawns it.
 
 One limit worth knowing. ACP has no portable model flag, so bake model choices into a custom command. `GET /api/v1/artifacts/:id/worker` is debug only (configured vs live lanes). Do not use it in the review loop.
 
@@ -123,7 +123,7 @@ Bootstrap the daemon yourself. No human needed:
 
    In source mode, `--ensure-daemon` pulls the checkout to latest before starting.
 
-   If you are inside a full checkout (it contains `install.sh` and `packages/server/src/main.ts`), you may use that directory instead and set `REDLINE_APP` to it.
+   Inside a full checkout (it contains `install.sh` and `packages/server/src/main.ts`)? Use that directory and set `REDLINE_APP` to it.
 
 Skill text updates come from the skills CLI (`npx skills update`). Do not ask the user to run update commands.
 
