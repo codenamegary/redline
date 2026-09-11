@@ -2,6 +2,11 @@ import { Thread, ThreadStatus, Version } from "@redline/http-contracts/artifact.
 import React from "react"
 import { Spinner } from "../../components/Spinner"
 
+// Reply box starts at this many visible lines and auto-grows up to
+// REPLY_MAX_HEIGHT px; longer drafts scroll instead of eating the panel.
+export const REPLY_ROWS = 3
+export const REPLY_MAX_HEIGHT = 168
+
 export type ThreadsPanelProps = {
   threads: Thread[]
   review: boolean
@@ -112,8 +117,24 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
   onSwitchVersion,
 }) => {
   const [reply, setReply] = React.useState("")
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const anchorVersion = thread.anchorVersion
   const resolvedIn = thread.resolvedInVersion ?? "earlier version"
+
+  // Auto-grow with the typed content, capped so long replies scroll.
+  React.useEffect(() => {
+    const el = textareaRef.current
+    if (el === null) return
+    el.style.height = "0px"
+    el.style.height = String(Math.min(el.scrollHeight, REPLY_MAX_HEIGHT)) + "px"
+  }, [reply])
+
+  const sendReply = () => {
+    const trimmed = reply.trim()
+    if (trimmed.length === 0) return
+    onReply(trimmed)
+    setReply("")
+  }
 
   return (
     <div
@@ -178,41 +199,38 @@ const ThreadCard: React.FC<ThreadCardProps> = ({
               )}
             </div>
           ))}
-          <div className="mt-0.5 flex gap-1.5">
-            <input
-              type="text"
+          <div className="mt-0.5 flex flex-col gap-1.5">
+            <textarea
+              ref={textareaRef}
+              rows={REPLY_ROWS}
               value={reply}
-              placeholder="Reply..."
+              placeholder="Reply… (⌘↵ to send)"
               onChange={(event) => setReply(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && reply.trim().length > 0) {
-                  onReply(reply.trim())
-                  setReply("")
-                }
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) sendReply()
               }}
-              className="min-w-0 flex-1 rounded-md border border-edge-strong bg-ink px-2 py-1 text-[13px] text-fog placeholder:text-dim"
+              className="max-h-[168px] min-h-[62px] w-full resize-none overflow-y-auto rounded-md border border-edge-strong bg-ink px-2 py-1 text-[13px] leading-relaxed text-fog placeholder:text-dim"
             />
-            <button
-              type="button"
-              disabled={busy || reply.trim().length === 0}
-              onClick={() => {
-                onReply(reply.trim())
-                setReply("")
-              }}
-              className="rounded-md border border-edge-strong bg-panel px-2 py-1 text-xs text-fog hover:border-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Reply
-            </button>
-            {review ? (
+            <div className="flex justify-end gap-1.5">
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => onToggleStatus(thread.status === "open" ? "resolved" : "open")}
+                disabled={busy || reply.trim().length === 0}
+                onClick={sendReply}
                 className="rounded-md border border-edge-strong bg-panel px-2 py-1 text-xs text-fog hover:border-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {thread.status === "open" ? "Resolve" : "Reopen"}
+                Reply
               </button>
-            ) : null}
+              {review ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onToggleStatus(thread.status === "open" ? "resolved" : "open")}
+                  className="rounded-md border border-edge-strong bg-panel px-2 py-1 text-xs text-fog hover:border-hover disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {thread.status === "open" ? "Resolve" : "Reopen"}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       )}
