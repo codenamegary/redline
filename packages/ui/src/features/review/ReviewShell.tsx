@@ -1,6 +1,6 @@
 import { isPendingVersion, Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
-import { Link } from "react-router"
+import { Link, useSearchParams } from "react-router"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Spinner } from "../../components/Spinner"
 import { StatusBadge } from "../../components/StatusBadge"
@@ -27,6 +27,7 @@ type ComposerDraft = {
 export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const artifactQuery = useArtifactQuery(id)
   const [composerOpen, setComposerOpen] = React.useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
   const feedbackQuery = useFeedbackQuery(id, composerOpen ? false : 5000)
   const view = feedbackQuery.data
 
@@ -37,7 +38,30 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const reply = useReplyMutation(id)
   const setThreadStatus = useThreadStatusMutation(id)
 
-  const [selectedVersion, setSelectedVersion] = React.useState<Version | undefined>(undefined)
+  const [userSelected, setUserSelected] = React.useState<Version | undefined>(undefined)
+
+  // Deep links (?v=v2, e.g. from gallery drawer rows) open that version;
+  // unknown or absent versions fall through to the current one. All version
+  // switches keep the param in sync so the URL stays shareable.
+  const requestedVersion = searchParams.get("v") ?? undefined
+  const validRequested =
+    requestedVersion !== undefined && view?.versions.some((entry) => entry.version === requestedVersion)
+      ? requestedVersion
+      : undefined
+  const selectedVersion = validRequested ?? userSelected
+
+  const selectVersion = (version: Version | undefined) => {
+    setUserSelected(version)
+    setSearchParams(
+      (previous) => {
+        const next = new URLSearchParams(previous)
+        if (version === undefined) next.delete("v")
+        else next.set("v", version)
+        return next
+      },
+      { replace: true },
+    )
+  }
   const [pinMode, setPinMode] = React.useState(false)
   const [logOpen, setLogOpen] = React.useState(false)
   const [draft, setDraft] = React.useState<ComposerDraft | undefined>(undefined)
@@ -196,7 +220,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
         <VersionsSelect
           versions={view.versions}
           value={displayedVersion}
-          onChange={(version) => setSelectedVersion(version)}
+          onChange={selectVersion}
         />
         <label className="flex items-center gap-1.5 text-xs text-mist">
           <input
@@ -239,7 +263,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
                 : "Finish the iterating round first"
           }
           onClick={() => iterate.mutate(undefined, { onSuccess: () => {
-            setSelectedVersion(undefined)
+            selectVersion(undefined)
             setLogOpen(false)
           } })}
           className={
@@ -396,7 +420,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
                 onFlash={focusThread}
                 onReply={(threadId, body) => reply.mutate({ threadId: threadId, body: body })}
                 onToggleStatus={(threadId, next) => setThreadStatus.mutate({ threadId: threadId, status: next })}
-                onSwitchVersion={(version) => setSelectedVersion(version)}
+                onSwitchVersion={selectVersion}
               />
             </aside>
           </>
