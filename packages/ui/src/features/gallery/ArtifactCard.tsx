@@ -1,10 +1,12 @@
+import { isPendingVersion } from "@redline/http-contracts/artifact.models"
 import { ArtifactSummary } from "@redline/http-contracts/artifact.schemas"
+import { BadgeCheck } from "lucide-react"
 import React from "react"
 import { Link } from "react-router"
 import { countLabel, shortDate } from "../../components/format"
 import { StatusBadge } from "../../components/StatusBadge"
 import { useFeedbackQuery } from "../review/queries"
-import { VersionChips } from "./VersionChips"
+import { VersionSpine } from "./VersionSpine"
 
 export type ArtifactCardProps = {
   item: ArtifactSummary
@@ -14,36 +16,35 @@ export const ArtifactCard: React.FC<ArtifactCardProps> = ({ item }) => {
   // The card upgrades itself from the feedback view (same cache key as the
   // review page): approval lives on version rows, not on the summary.
   const feedbackQuery = useFeedbackQuery(item.id, false)
-  const view = feedbackQuery.data
-  const versions = view?.versions ?? []
-  const approved = view?.approvedAt !== undefined
-  const lastApproved = versions.slice().reverse().find((entry) => entry.approvedAt !== undefined)
-  const previouslyApproved = !approved && lastApproved !== undefined
+  const versions = feedbackQuery.data?.versions ?? []
+  const hasPending = versions.some(isPendingVersion)
+  const currentApproved = feedbackQuery.data?.approvedAt !== undefined
+  // Honest badge grammar: "approved" only when the current version carries
+  // the approval and nothing is in flight — an iterate-after-approve round
+  // reads as "iterating" while the spine keeps the green history visible.
+  const approved = currentApproved && !hasPending
+  // Sealed: approved and stable. A quiet border tint + outline check.
+  const sealed = approved && item.status === "review"
 
   return (
-    <article className="flex flex-col gap-2 rounded-[10px] border border-edge bg-card px-4 py-3.5">
+    <article
+      className={`relative flex flex-col gap-2 rounded-[10px] border bg-card py-3.5 pl-5 pr-4 ${
+        sealed ? "border-go/30" : "border-edge"
+      }`}
+    >
+      <VersionSpine versions={versions} current={item.current} />
       <div className="flex items-center justify-between gap-2.5">
-        <Link to={"/a/" + item.id} className="text-[15px] font-semibold text-fog no-underline hover:text-white">
-          {item.title}
-        </Link>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <Link to={"/a/" + item.id} className="truncate text-[15px] font-semibold text-fog no-underline hover:text-white">
+            {item.title}
+          </Link>
+          {sealed ? <BadgeCheck className="size-4 shrink-0 text-go" aria-hidden /> : null}
+        </span>
         <StatusBadge status={item.status} approved={approved} />
       </div>
       <div className="mt-0.5 text-xs text-mist">
-        {item.id} ·{" "}
-        {view === undefined ? (
-          <span>
-            {item.current} · {countLabel(item.versionCount, "version")}
-          </span>
-        ) : (
-          <VersionChips versions={versions} current={item.current} />
-        )}
-        {previouslyApproved ? (
-          <span className="text-go">
-            {" "}
-            · {lastApproved?.version} previously approved
-          </span>
-        ) : null}
-        {" · "}
+        {item.id} · {item.current} · {countLabel(item.versionCount, "version")}
+        {item.assetsCount > 0 ? " · " + countLabel(item.assetsCount, "image") : ""} ·{" "}
         <span className={item.openThreads > 0 ? "text-warn" : undefined}>
           {countLabel(item.openThreads, "open thread")}
         </span>{" "}

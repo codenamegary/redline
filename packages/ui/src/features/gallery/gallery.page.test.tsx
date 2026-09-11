@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createQueryClient } from "../../app/query.client"
@@ -103,7 +103,7 @@ describe("GalleryPage", () => {
     )
   })
 
-  it("renders approval state and version chips from the feedback views", async () => {
+  it("renders approval state and version spines from the feedback views", async () => {
     render(
       <QueryClientProvider client={createQueryClient()}>
         <MemoryRouter initialEntries={["/"]}>
@@ -113,18 +113,23 @@ describe("GalleryPage", () => {
     )
     expect(await screen.findByRole("link", { name: "Current approved" })).toBeInTheDocument()
 
-    // Current version approved: green badge, chips for the whole ledger.
-    expect(await screen.findByText("approved")).toBeInTheDocument()
-    expect(screen.getAllByText("v1").length).toBeGreaterThan(0)
-    expect(screen.getAllByText("v2").length).toBeGreaterThan(0)
+    const cards = screen.getAllByRole("article")
+    const sealedCard = within(cards[0])
+    const pastCard = within(cards[1])
 
-    // An older version carries the last approval: card stays "in review"
-    // and shows the previously-approved note.
-    expect(await screen.findByText(/v2 previously approved/)).toBeInTheDocument()
+    // Current version approved and stable: approved badge, and the spine's
+    // drawer carries the per-version ledger ("vN · approved").
+    expect(await sealedCard.findByText("v2 · approved")).toBeInTheDocument()
+    expect(sealedCard.getByText("approved")).toBeInTheDocument()
+
+    // An older version carries the last approval: the badge stays honest
+    // ("in review"), the spine keeps the green history visible.
+    expect(await pastCard.findByText("v2 · approved")).toBeInTheDocument()
+    expect(pastCard.queryByText("approved")).not.toBeInTheDocument()
     expect(screen.getAllByText("in review")).toHaveLength(2)
 
     // No feedback view reachable: the card falls back to the plain row.
-    expect(screen.getByText(/2 versions/)).toBeInTheDocument()
+    expect(within(cards[2]).getByText(/2 versions/)).toBeInTheDocument()
     expect(screen.getByText("review loop for design artifacts: architecture docs, decision records, API contracts, diagrams, UI mockups")).toBeInTheDocument()
   })
 })
