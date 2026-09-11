@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/codenamegary/redline/compare/v1.0.0...v1.1.0) (2026-09-11)
+
+
+### Features
+
+* **review:** collapsible, resizable comments sidebar with auto-growing reply box ([#52](https://github.com/codenamegary/redline/issues/52)) ([dbf7f36](https://github.com/codenamegary/redline/commit/dbf7f369610990fd5dbd7ab341dc39d4dcebf55c))
+* **ui:** replace favicon with option E dark variant asset set ([#50](https://github.com/codenamegary/redline/issues/50)) ([e379dfa](https://github.com/codenamegary/redline/commit/e379dfa4ea24ac6356cd8899fbd3febc6a62337d))
+
+
+### Bug Fixes
+
+* **ui:** approval state on gallery cards — version drawer + seal ([#49](https://github.com/codenamegary/redline/issues/49)) ([5df9e66](https://github.com/codenamegary/redline/commit/5df9e66022e005d2e75df38a54a363977fc91421))
+
 ## [1.0.0](https://github.com/codenamegary/redline/compare/v0.7.0...v1.0.0) (2026-09-10)
 
 
