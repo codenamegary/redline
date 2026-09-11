@@ -1,6 +1,7 @@
 import { isPendingVersion, Anchor, Thread, Version } from "@redline/http-contracts/artifact.models"
 import React from "react"
 import { Link } from "react-router"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Spinner } from "../../components/Spinner"
 import { StatusBadge } from "../../components/StatusBadge"
 import { numberedPins, PinsOverlay } from "./PinsOverlay"
@@ -8,6 +9,8 @@ import { PinOffset } from "./PinsOverlay"
 import { PresenceBadge } from "./PresenceBadge"
 import { useApproveMutation, useArtifactQuery, useCreateThreadMutation, useFeedbackQuery, useIterateMutation, useReplyMutation, useStopIterationMutation, useThreadStatusMutation } from "./queries"
 import { SessionLogPanel } from "./SessionLogPanel"
+import { SidebarResizer } from "./SidebarResizer"
+import { clampSidebarWidth, loadSidebarPrefs, saveSidebarPrefs, SidebarPrefs, sidebarWidthFromDrag, SIDEBAR_DEFAULT_WIDTH } from "./sidebar.prefs"
 import { ThreadsComposer } from "./ThreadsComposer"
 import { ThreadsPanel } from "./ThreadsPanel"
 import { VersionsSelect } from "./VersionsSelect"
@@ -44,6 +47,13 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const frameRef = React.useRef<HTMLIFrameElement>(null)
   const [pinOffset, setPinOffset] = React.useState<PinOffset>({ x: 0, y: 0 })
   const previousStatus = React.useRef<string | undefined>(undefined)
+  const [sidebar, setSidebar] = React.useState<SidebarPrefs>(loadSidebarPrefs)
+  const [sidebarDragging, setSidebarDragging] = React.useState(false)
+
+  // Persist sidebar width + collapsed state on every change (drag, toggle).
+  React.useEffect(() => {
+    saveSidebarPrefs(sidebar)
+  }, [sidebar])
 
   const status = view?.artifactStatus
   const displayedVersion: Version = selectedVersion ?? view?.version ?? "v1"
@@ -74,6 +84,15 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
     setActiveThreadId(thread.id)
   }
 
+  const collapseSidebar = () => setSidebar((previous) => ({ ...previous, collapsed: true }))
+  const expandSidebar = () => setSidebar((previous) => ({ ...previous, collapsed: false }))
+  const dragSidebar = (clientX: number) =>
+    setSidebar((previous) => ({ ...previous, width: sidebarWidthFromDrag(clientX, window.innerWidth) }))
+  const nudgeSidebar = (delta: number) =>
+    setSidebar((previous) => ({ ...previous, width: clampSidebarWidth(previous.width + delta) }))
+  const resetSidebarWidth = () =>
+    setSidebar((previous) => ({ ...previous, width: SIDEBAR_DEFAULT_WIDTH }))
+
   if (artifactQuery.isPending || feedbackQuery.isPending || view === undefined) {
     return (
       <div className="grid min-h-screen place-items-center text-mist">
@@ -99,6 +118,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
   const pending = view.versions.find(isPendingVersion)
   const pins = numberedPins(view.threads, displayedVersion)
   const numbers = new Map(pins.map((pin) => [pin.thread.id, pin.number]))
+  const openThreadCount = view.threads.filter((thread) => thread.status === "open").length
 
   const iteratingBanner =
     iterating && pending !== undefined
@@ -281,7 +301,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
             src={frameSrc}
             title="artifact"
             onLoad={onFrameLoad}
-            className="block h-full w-full border-0"
+            className={"block h-full w-full border-0" + (sidebarDragging ? " pointer-events-none" : "")}
           />
           <PinsOverlay
             pins={pins}
@@ -295,44 +315,92 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
             }}
           />
         </section>
-        <aside className="flex w-[360px] shrink-0 flex-col gap-2.5 overflow-y-auto border-l border-edge bg-panel p-3">
-          {artifact.prompt.length > 0 ? (
-            <details className="rounded-lg border border-edge px-2.5 py-2 text-xs text-mist">
-              <summary className="cursor-pointer text-[#c6cbd6]">Brief</summary>
-              <p className="mt-2 mb-0 whitespace-pre-wrap">{artifact.prompt}</p>
-            </details>
-          ) : null}
-          <div className="text-xs text-mist">
-            Comment on anything — the agent answers live in the thread. Hit <b>Iterate</b> to send the batch: the
-            agent rewrites the artifact and publishes the next version. <b>Approve</b> just means done for now.
-          </div>
-          {composerOpen && draft !== undefined ? (
-            <ThreadsComposer
-              target={draft.label}
-              busy={createThread.isPending}
-              onCancel={() => {
-                setComposerOpen(false)
-                setDraft(undefined)
-              }}
-              onSave={saveComposer}
+        {sidebar.collapsed ? (
+          <aside className="flex w-10 shrink-0 flex-col items-center gap-2 border-l border-edge bg-panel py-3">
+            <button
+              type="button"
+              onClick={expandSidebar}
+              title="Show comments sidebar"
+              aria-label="Show comments sidebar"
+              className="rounded-md border border-edge-strong bg-panel p-1.5 text-mist hover:border-hover hover:text-fog"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            {openThreadCount > 0 ? (
+              <span
+                className="inline-flex min-w-5 items-center justify-center rounded-full bg-redline px-1 text-[11px] font-bold text-white"
+                title={String(openThreadCount) + " open threads"}
+              >
+                {String(openThreadCount)}
+              </span>
+            ) : null}
+          </aside>
+        ) : (
+          <>
+            <SidebarResizer
+              onDrag={dragSidebar}
+              onNudge={nudgeSidebar}
+              onReset={resetSidebarWidth}
+              onDragStart={() => setSidebarDragging(true)}
+              onDragEnd={() => setSidebarDragging(false)}
             />
-          ) : null}
-          <ThreadsPanel
-            threads={view.threads}
-            review={review}
-            numbers={numbers}
-            expanded={expanded}
-            activeThreadId={activeThreadId}
-            busy={reply.isPending || setThreadStatus.isPending}
-            onToggleExpanded={(threadId) =>
-              setExpanded((previous) => ({ ...previous, [threadId]: !(previous[threadId] ?? false) }))
-            }
-            onFlash={focusThread}
-            onReply={(threadId, body) => reply.mutate({ threadId: threadId, body: body })}
-            onToggleStatus={(threadId, next) => setThreadStatus.mutate({ threadId: threadId, status: next })}
-            onSwitchVersion={(version) => setSelectedVersion(version)}
-          />
-        </aside>
+            <aside
+              className="flex shrink-0 flex-col gap-2.5 overflow-y-auto border-l border-edge bg-panel p-3"
+              style={{ width: sidebar.width, maxWidth: "60vw" }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] uppercase tracking-[0.08em] text-mist">
+                  Comments ({String(openThreadCount)} open)
+                </span>
+                <button
+                  type="button"
+                  onClick={collapseSidebar}
+                  title="Hide comments sidebar"
+                  aria-label="Hide comments sidebar"
+                  className="rounded-md border border-edge-strong bg-panel p-1.5 text-mist hover:border-hover hover:text-fog"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+              {artifact.prompt.length > 0 ? (
+                <details className="rounded-lg border border-edge px-2.5 py-2 text-xs text-mist">
+                  <summary className="cursor-pointer text-[#c6cbd6]">Brief</summary>
+                  <p className="mt-2 mb-0 whitespace-pre-wrap">{artifact.prompt}</p>
+                </details>
+              ) : null}
+              <div className="text-xs text-mist">
+                Comment on anything — the agent answers live in the thread. Hit <b>Iterate</b> to send the batch: the
+                agent rewrites the artifact and publishes the next version. <b>Approve</b> just means done for now.
+              </div>
+              {composerOpen && draft !== undefined ? (
+                <ThreadsComposer
+                  target={draft.label}
+                  busy={createThread.isPending}
+                  onCancel={() => {
+                    setComposerOpen(false)
+                    setDraft(undefined)
+                  }}
+                  onSave={saveComposer}
+                />
+              ) : null}
+              <ThreadsPanel
+                threads={view.threads}
+                review={review}
+                numbers={numbers}
+                expanded={expanded}
+                activeThreadId={activeThreadId}
+                busy={reply.isPending || setThreadStatus.isPending}
+                onToggleExpanded={(threadId) =>
+                  setExpanded((previous) => ({ ...previous, [threadId]: !(previous[threadId] ?? false) }))
+                }
+                onFlash={focusThread}
+                onReply={(threadId, body) => reply.mutate({ threadId: threadId, body: body })}
+                onToggleStatus={(threadId, next) => setThreadStatus.mutate({ threadId: threadId, status: next })}
+                onSwitchVersion={(version) => setSelectedVersion(version)}
+              />
+            </aside>
+          </>
+        )}
       </main>
       {logOpen && iterating ? <SessionLogPanel id={id} onClose={() => setLogOpen(false)} /> : null}
     </div>
