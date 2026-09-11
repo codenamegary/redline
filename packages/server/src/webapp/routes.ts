@@ -11,6 +11,28 @@ import { webDir } from "./paths"
 
 const AssetParamsSchema = z.object({ "*": z.string().min(1) })
 
+// Files vite emits at the web root from public/ — favicons, manifests — are
+// served by name from the not-found handler. One path segment, no traversal,
+// extension-checked, and only when the file exists in the built web dir.
+// Everything else keeps the SPA fallback behavior.
+const rootFilePattern = /^[A-Za-z0-9][A-Za-z0-9._-]*\.[A-Za-z0-9]{1,9}$/
+const rootFileExtensions = [".svg", ".png", ".ico", ".txt", ".webmanifest", ".xml", ".json"]
+
+const resolveWebRootFile = async (dir: string, rawUrl: string): Promise<string | undefined> => {
+  let pathname: string
+  try {
+    pathname = decodeURIComponent(new URL(rawUrl, "http://redline.invalid").pathname)
+  } catch {
+    return undefined
+  }
+  const name = pathname.replace(/^\/+/, "")
+  if (!rootFilePattern.test(name)) return undefined
+  const dot = name.lastIndexOf(".")
+  if (!rootFileExtensions.includes(name.slice(dot).toLowerCase())) return undefined
+  const target = join(dir, name)
+  return (await stat(target).catch(() => undefined))?.isFile() ? target : undefined
+}
+
 // Tiny standalone page served when the SPA was never built. Keeps --from-source
 // usable without a web build; the API stays fully functional.
 export const missingAssetsPage = (): string =>
@@ -42,7 +64,16 @@ export const registerWebappRoutes = (app: FastifyInstance): void => {
       .send(createReadStream(target))
   })
 
-  app.setNotFoundHandler((request, reply) => {
+  app.setNotFoundHandler(async (request, reply) => {
+    if (dir !== undefined && request.method === "GET" && !request.url.startsWith("/api")) {
+      const file = await resolveWebRootFile(dir, request.raw.url ?? "/")
+      if (file !== undefined) {
+        return reply
+          .header("cache-control", "public, max-age=3600")
+          .type(contentTypeForPath(file))
+          .send(createReadStream(file))
+      }
+    }
     const navigates = (request.headers.accept ?? "").includes("text/html")
     const claimed = request.method === "GET" && navigates && !request.url.startsWith("/api")
     if (!claimed) {

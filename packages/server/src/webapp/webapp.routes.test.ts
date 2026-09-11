@@ -13,6 +13,9 @@ const makeWebDir = (withIndex: boolean): string => {
     mkdirSync(join(dir, "assets"), { recursive: true })
     writeFileSync(join(dir, "index.html"), "<!doctype html><html><body>spa</body></html>")
     writeFileSync(join(dir, "assets", "app.test123.js"), "console.log(1)")
+    writeFileSync(join(dir, "favicon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'></svg>")
+    writeFileSync(join(dir, "favicon.ico"), "ico-bytes")
+    writeFileSync(join(dir, "apple-touch-icon.png"), "png-bytes")
   }
   return dir
 }
@@ -95,6 +98,49 @@ describe("webapp routes", () => {
     const response = await app.inject({ method: "GET", url: "/nowhere" })
     expect(response.statusCode).toBe(404)
     expect(response.headers["content-type"]).toContain("application/problem+json")
+    await app.close()
+  })
+
+  it("serves root static files like favicons for non-HTML clients", async () => {
+    const app = build()
+    const svg = await app.inject({ method: "GET", url: "/favicon.svg" })
+    expect(svg.statusCode).toBe(200)
+    expect(svg.headers["content-type"]).toContain("image/svg+xml")
+    expect(svg.headers["cache-control"]).toContain("public")
+    expect(svg.body).toContain("<svg")
+    const ico = await app.inject({ method: "GET", url: "/favicon.ico" })
+    expect(ico.statusCode).toBe(200)
+    expect(ico.headers["content-type"]).toContain("image/x-icon")
+    expect(ico.body).toBe("ico-bytes")
+    const png = await app.inject({ method: "GET", url: "/apple-touch-icon.png?v=2" })
+    expect(png.statusCode).toBe(200)
+    expect(png.headers["content-type"]).toContain("image/png")
+    await app.close()
+  })
+
+  it("keeps the SPA shell for HTML navigations that name a root file", async () => {
+    const app = build()
+    const response = await app.inject({ method: "GET", url: "/favicon.svg", headers: { accept: "text/html" } })
+    expect(response.statusCode).toBe(200)
+    expect(response.headers["content-type"]).toContain("image/svg+xml")
+    await app.close()
+  })
+
+  it("404s as problem+json for missing root files", async () => {
+    const app = build()
+    const response = await app.inject({ method: "GET", url: "/nope.png" })
+    expect(response.statusCode).toBe(404)
+    expect(response.headers["content-type"]).toContain("application/problem+json")
+    await app.close()
+  })
+
+  it("refuses traversal, hidden, nested, and html root file requests", async () => {
+    const app = build()
+    for (const url of ["/..%2Ffavicon.svg", "/favicon.svg%2F..", "/.env", "/sub/favicon.svg", "/index.html"]) {
+      const response = await app.inject({ method: "GET", url })
+      expect(response.statusCode).toBe(404)
+      expect(response.headers["content-type"]).toContain("application/problem+json")
+    }
     await app.close()
   })
 
