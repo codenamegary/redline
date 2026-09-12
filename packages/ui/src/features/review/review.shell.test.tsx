@@ -66,6 +66,28 @@ describe("ReviewShell sidebar", () => {
     localStorage.clear()
   })
 
+  it("puts the artifact title in the page title, restoring it on unmount", async () => {
+    // Mirror index.html: production ships <title>redline</title> in the head.
+    document.head.innerHTML = "<title>redline</title>"
+    try {
+      const { unmount } = renderShell()
+      await screen.findByText("Demo artifact")
+      expect(document.title).toBe("Demo artifact")
+      unmount()
+      expect(document.title).toBe("redline")
+    } finally {
+      document.head.innerHTML = ""
+    }
+  })
+
+  it("shows the redline mark icon in the review header", async () => {
+    renderShell()
+    await screen.findByText("Demo artifact")
+    const header = screen.getByRole("banner")
+    const mark = header.querySelector('[data-testid="redline-mark"]')
+    expect(mark).not.toBeNull()
+  })
+
   it("collapses and expands the sidebar, persisting the state", async () => {
     renderShell()
     const hide = await screen.findByRole("button", { name: "Hide comments sidebar" })
