@@ -102,6 +102,29 @@ describe("renderTemplate", () => {
   })
 })
 
+describe("DEFAULT_WORKER_PROMPT", () => {
+  it("forbids writing, editing, creating, or committing files anywhere on disk", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("Do not write, edit, create, or commit any files")
+    expect(DEFAULT_WORKER_PROMPT).toContain("Do not touch the project directory")
+    expect(DEFAULT_WORKER_PROMPT).toContain("A file on disk is invisible to redline")
+  })
+
+  it("names the delivery contract: the response is the deliverable, the server publishes", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain(
+      "Your entire deliverable is the final response: the complete single-file HTML document",
+    )
+    expect(DEFAULT_WORKER_PROMPT).toContain("The server publishes it as the next version")
+  })
+
+  it("survives rendering: buildWorkPrompt carries the no-file-writes contract", () => {
+    const prompt = buildWorkPrompt(workerInput())
+    expect(prompt).toContain("Do not write, edit, create, or commit any files")
+    expect(prompt).toContain("Do not touch the project directory")
+    expect(prompt).toContain("Your entire deliverable is the final response")
+    expect(prompt).toContain("The server publishes it as the next version")
+  })
+})
+
 describe("buildReplyPrompt", () => {
   it("renders the template and appends the JSON-array contract", () => {
     const prompt = buildReplyPrompt(reviewerInput())
