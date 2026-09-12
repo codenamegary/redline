@@ -20,6 +20,7 @@ import {
 } from "@redline/http-contracts/artifact.models"
 import { FeedbackView } from "@redline/http-contracts/artifact.schemas"
 import { hasErrorCode, storeError } from "./errors"
+import { stripTitlePrefixes } from "./title.prefixes"
 
 export type Store = {
   home: string
@@ -190,10 +191,11 @@ export type CreateArtifactInput = {
 
 export const createArtifact = async (store: Store, input: CreateArtifactInput): Promise<ArtifactMeta> => {
   const now = new Date().toISOString()
-  const id = uniqueArtifactId(store, utcTimestampPart(new Date()) + "-" + slugify(input.title))
+  const title = stripTitlePrefixes(input.title)
+  const id = uniqueArtifactId(store, utcTimestampPart(new Date()) + "-" + slugify(title))
   const meta: ArtifactMeta = {
     id: id,
-    title: input.title,
+    title: title,
     prompt: input.prompt,
     status: "review",
     createdAt: now,

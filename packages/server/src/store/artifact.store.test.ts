@@ -59,6 +59,14 @@ describe("artifact store", () => {
     expect(stored.id).toBe(meta.id)
   })
 
+  it("strips redline session-name prefixes from the title at creation", async () => {
+    const store = makeStore()
+    const meta = await createArtifact(store, { title: "redline - Fix nav overlap", prompt: "", html: "<p>x</p>" })
+    expect(meta.title).toBe("Fix nav overlap")
+    const reread = await readArtifactMeta(store, meta.id)
+    expect(reread.title).toBe("Fix nav overlap")
+  })
+
   it("reads meta.json with iteratedAt null (never iterated)", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, { title: "Fresh", prompt: "", html: "<p>v1</p>" })
