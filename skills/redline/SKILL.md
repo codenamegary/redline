@@ -71,6 +71,8 @@ Start every artifact from this skeleton. Tailwind's browser build compiles utili
 
 These classes are a menu, not a framework. Copy only the ones you use; delete or restyle the rest. Define your own component classes in the same block whenever markup repeats — name them however you like, the `rl-` prefix is convention only. Any utility composes with or overrides a component class (`class="rl-card p-10"`). Theme tokens exist so one value re-skins the whole artifact; pick accent colors that fit the content. Everything Tailwind offers is available: the skeleton is a starting point, never a constraint.
 
+One hard rule inside `@apply`: every class must exist — a v4 default utility, a plugin utility, or one your `@theme` tokens generate. One unknown class silently kills the entire stylesheet: the CDN script still loads, a compiled sheet gets injected (preflight only, zero utilities), and there are no console errors. It looks exactly like "Tailwind never loaded". If a utility doesn't exist, define its token in `@theme` first (for example `--text-2xs: 0.6875rem;` before using `text-2xs`), or use a real utility. Unknown classes in markup are harmless — they just don't generate CSS. Only `@apply` is fatal.
+
 ## HTTP endpoints
 
 The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLINE_PORT`). Base URL below is `http://127.0.0.1:4739`.
