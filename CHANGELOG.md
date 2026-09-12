@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/codenamegary/redline/compare/v1.2.0...v1.2.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **api:** require cwd on artifact create and persist it to meta.json ([#58](https://github.com/codenamegary/redline/issues/58)) ([ddad4c8](https://github.com/codenamegary/redline/commit/ddad4c89109910f23afba1a2b9eeb550b29f6700))
+
 ## [1.2.0](https://github.com/codenamegary/redline/compare/v1.1.1...v1.2.0) (2026-09-12)
 
 
