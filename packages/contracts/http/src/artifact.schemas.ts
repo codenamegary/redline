@@ -35,6 +35,9 @@ export const CreateArtifactBodySchema = z.object({
   prompt: z.string().max(4000).default(""),
   note: z.string().max(500).optional(),
   html: z.string().min(1).max(5_000_000),
+  // Project directory the artifact was produced from. Mandatory: sessions
+  // for Iterate and comment duties spawn there.
+  cwd: z.string().trim().min(1).max(4096),
 })
 
 export type CreateArtifactBody = z.infer<typeof CreateArtifactBodySchema>

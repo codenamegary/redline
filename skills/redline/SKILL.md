@@ -77,7 +77,7 @@ The server speaks plain HTTP at `http://127.0.0.1:4739` (or the port in `$REDLIN
 
 | Endpoint | Purpose |
 |------|---------|
-| `POST /api/v1/artifacts` | `{title, html, prompt?, note?}` → 201 with a summary incl. `reviewUrl`. Share it and stop |
+| `POST /api/v1/artifacts` | `{title, html, cwd, prompt?, note?}` → 201 with a summary incl. `reviewUrl`. Share it and stop |
 | `POST /api/v1/artifacts/:id/versions` | `{html, note?}` publishes the pending iteration (409 unless iterating), status returns to review |
 | `POST /api/v1/artifacts/:id/assets` | `{version, filename, data}` (base64) attaches a static image to one version (5 MB max). Upload before the HTML that references it |
 | `GET /api/v1/artifacts/:id/feedback` | threads, presence, pending iteration. `?version=vN` filters to one version |
@@ -136,7 +136,7 @@ Stage HTML the same way as the workflow: write `.redline-drafts/<short-slug>.htm
 ```bash
 # create
 curl -s -X POST http://127.0.0.1:4739/api/v1/artifacts -H 'content-type: application/json' \
-  -d '{"title":"...","html":"<h1>...</h1>"}'
+  -d '{"title":"...","html":"<h1>...</h1>","cwd":"'$PWD'"}'
 # read feedback and loop status
 curl -s http://127.0.0.1:4739/api/v1/artifacts/<id>/feedback
 # answer a thinking placeholder (the only editable message kind)
