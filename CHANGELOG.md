@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/codenamegary/redline/compare/v1.1.0...v1.1.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **server:** serve web-root static files (favicons) from the not-found handler ([#53](https://github.com/codenamegary/redline/issues/53)) ([cd0d0ae](https://github.com/codenamegary/redline/commit/cd0d0aef1a658c4a373567a04d707fa18f4c589e))
+
 ## [1.1.0](https://github.com/codenamegary/redline/compare/v1.0.0...v1.1.0) (2026-09-11)
 
 
