@@ -364,6 +364,9 @@ const dispatchIteration = async (
       targets: [],
       batchThreadIds: batchThreadIds,
       htmlPath: htmlPath,
+      // From meta.json: the worker session spawns in the project directory
+      // recorded at create time.
+      cwd: meta.cwd,
     },
     seed,
   )

@@ -12,6 +12,7 @@ export const getArtifactRoute = (ctx: RoutesContext): RouteDescriptor => ({
     return {
       ...(await ctx.summarizeArtifact(from, meta)),
       prompt: meta.prompt,
+      cwd: meta.cwd,
       iteratedAt: meta.iteratedAt ?? null,
       versions: meta.versions,
     }

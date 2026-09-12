@@ -37,12 +37,13 @@ const makeStore = (): Store => {
 }
 
 describe("artifact store", () => {
-  it("creates an artifact with a published v1 and review status", async () => {
+  it("creates an artifact with a published v1, review status, and the working directory", async () => {
     const store = makeStore()
     const meta = await createArtifact(store, {
       title: "Dashboard redesign",
       prompt: "a metrics dashboard",
       html: "<h1 id=\"hero\">Hello</h1>",
+      cwd: "/home/dev/dashboard",
     })
     expect(meta.status).toBe("review")
     expect(meta.current).toBe("v1")
@@ -51,17 +52,20 @@ describe("artifact store", () => {
     expect(meta.versions[0]?.batch).toBeUndefined()
     expect(meta.title).toBe("Dashboard redesign")
     expect(meta.prompt).toBe("a metrics dashboard")
+    expect(meta.cwd).toBe("/home/dev/dashboard")
     const html = readFileSync(join(store.artifactsDir, meta.id, "v1-index.html"), "utf8")
     expect(html).toBe("<h1 id=\"hero\">Hello</h1>")
     const stored = JSON.parse(readFileSync(join(store.artifactsDir, meta.id, "meta.json"), "utf8")) as {
       id: string
+      cwd: string
     }
     expect(stored.id).toBe(meta.id)
+    expect(stored.cwd).toBe("/home/dev/dashboard")
   })
 
   it("strips redline session-name prefixes from the title at creation", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "redline - Fix nav overlap", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "redline - Fix nav overlap", prompt: "", html: "<p>x</p>" })
     expect(meta.title).toBe("Fix nav overlap")
     const reread = await readArtifactMeta(store, meta.id)
     expect(reread.title).toBe("Fix nav overlap")
@@ -69,7 +73,7 @@ describe("artifact store", () => {
 
   it("reads meta.json with iteratedAt null (never iterated)", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Fresh", prompt: "", html: "<p>v1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Fresh", prompt: "", html: "<p>v1</p>" })
     const metaPath = join(store.artifactsDir, meta.id, "meta.json")
     writeFileSync(metaPath, JSON.stringify({ ...meta, iteratedAt: null }))
     const reread = await readArtifactMeta(store, meta.id)
@@ -78,7 +82,7 @@ describe("artifact store", () => {
 
   it("builds unique slug ids for same-titled artifacts", async () => {
     const store = makeStore()
-    const input = { title: "My Mock: v2!", prompt: "", html: "<p>x</p>" }
+    const input = { title: "My Mock: v2!", prompt: "", html: "<p>x</p>", cwd: "/proj" }
     const first = await createArtifact(store, input)
     const second = await createArtifact(store, input)
     expect(first.id).not.toBe(second.id)
@@ -88,7 +92,7 @@ describe("artifact store", () => {
 
   it("runs the iteration loop: freeze batch, publish, back to review", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Deck", prompt: "", html: "<p>v1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Deck", prompt: "", html: "<p>v1</p>" })
     const thread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -119,14 +123,14 @@ describe("artifact store", () => {
 
   it("rejects publishing outside iterating", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>v1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>v1</p>" })
     const early = publishIteration(store, meta.id, { html: "<p>v2</p>" })
     expect(early).rejects.toMatchObject({ kind: "conflict" })
   })
 
   it("stamps approval on the current version only, and never during iterating", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>v1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>v1</p>" })
     await startIteration(store, meta.id)
     const duringIterating = approveVersion(store, meta.id, "v1")
     expect(duringIterating).rejects.toMatchObject({ kind: "conflict" })
@@ -146,7 +150,7 @@ describe("artifact store", () => {
 
   it("starts with empty feedback and accumulates threads", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>x</p>" })
     const empty = await readFeedbackDoc(store, meta.id, "v1")
     expect(empty.threads).toHaveLength(0)
     const thread = await appendThread(store, meta.id, {
@@ -164,7 +168,7 @@ describe("artifact store", () => {
 
   it("appends text messages and toggles thread status", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>x</p>" })
     const thread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -187,7 +191,7 @@ describe("artifact store", () => {
 
   it("replaces thinking placeholders and nothing else", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>x</p>" })
     const thread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -216,7 +220,7 @@ describe("artifact store", () => {
     const store = makeStore()
     const missingArtifact = readArtifactMeta(store, "2099-01-01-000000-nope")
     expect(missingArtifact).rejects.toMatchObject({ kind: "not-found" })
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>x</p>" })
     const missingThread = appendThreadMessage(store, meta.id, "t-missing", {
       body: "hi",
       author: "user",
@@ -232,9 +236,9 @@ describe("artifact store", () => {
 
   it("lists artifacts newest first and skips junk directories", async () => {
     const store = makeStore()
-    const first = await createArtifact(store, { title: "First", prompt: "", html: "<p>1</p>" })
+    const first = await createArtifact(store, { cwd: "/proj", title: "First", prompt: "", html: "<p>1</p>" })
     await new Promise((resolve) => setTimeout(resolve, 10))
-    const second = await createArtifact(store, { title: "Second", prompt: "", html: "<p>2</p>" })
+    const second = await createArtifact(store, { cwd: "/proj", title: "Second", prompt: "", html: "<p>2</p>" })
     const junkDir = join(store.artifactsDir, "junk-partial-write")
     mkdirSync(junkDir, { recursive: true })
     writeFileSync(join(junkDir, "orphan.txt"), "not a meta file")
@@ -244,7 +248,7 @@ describe("artifact store", () => {
 
   it("counts open threads across versions", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     const openThread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -265,7 +269,7 @@ describe("artifact store", () => {
 
   it("stamps heartbeat and host session on the pending batch", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     await appendThread(store, meta.id, { version: "v1", anchor: null, body: "fix", author: "user" })
     await startIteration(store, meta.id)
 
@@ -291,7 +295,7 @@ describe("artifact store", () => {
 
   it("rolls a pending iteration back to review and frees the version number", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     const thread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -324,7 +328,7 @@ describe("artifact store", () => {
 
   it("keeps threads visible across versions in the artifact-scoped view", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     const thread = await appendThread(store, meta.id, {
       version: "v1",
       anchor: { selector: "#hero", text: "one", rect: { x: 0, y: 0, width: 1, height: 1 } },
@@ -363,7 +367,7 @@ describe("artifact store", () => {
 
   it("sorts the view newest-first and derives anchor versions for unpinned threads", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     const first = await appendThread(store, meta.id, {
       version: "v1",
       anchor: null,
@@ -399,7 +403,7 @@ describe("artifact store", () => {
 
   it("yields stable marker numbers when threads sort oldest-first by createdAt", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     // Anchor-bearing open threads, the kind the review UI numbers.
     const anchor = { selector: "#pin", text: "pin", rect: { x: 1, y: 2, width: 3, height: 4 } }
     const first = await appendThread(store, meta.id, {
@@ -445,7 +449,7 @@ describe("artifact store", () => {
 
   it("rejects threads pinned on unknown versions", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Page", prompt: "", html: "<p>1</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Page", prompt: "", html: "<p>1</p>" })
     const bad = appendThread(store, meta.id, {
       version: "v9",
       anchor: null,
@@ -457,7 +461,7 @@ describe("artifact store", () => {
 
   it("saves version assets, lists them, and records them on the version row", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Assets", prompt: "", html: "<img src=\"hero.png\">" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Assets", prompt: "", html: "<img src=\"hero.png\">" })
     const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
     const first = await saveVersionAsset(store, meta.id, "v1", "hero.png", bytes)
     expect(first.filename).toBe("hero.png")
@@ -478,7 +482,7 @@ describe("artifact store", () => {
 
   it("rejects invalid asset filenames, unknown versions, duplicates, and oversize bytes", async () => {
     const store = makeStore()
-    const meta = await createArtifact(store, { title: "Asset guards", prompt: "", html: "<p>x</p>" })
+    const meta = await createArtifact(store, { cwd: "/proj", title: "Asset guards", prompt: "", html: "<p>x</p>" })
     const bytes = new Uint8Array([1])
 
     expect(saveVersionAsset(store, meta.id, "v1", "../evil.png", bytes)).rejects.toMatchObject({

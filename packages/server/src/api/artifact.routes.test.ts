@@ -98,7 +98,7 @@ const createArtifact = async (title: string, html: string): Promise<z.infer<type
   const response = await app.inject({
     method: "POST",
     url: "/api/v1/artifacts",
-    payload: { title: title, html: html },
+    payload: { title: title, html: html, cwd: "/tmp/redline-fixture-project" },
   })
   if (response.statusCode !== 201) throw new Error("fixture create failed: " + response.body)
   return SummarySchema.parse(response.json())
@@ -161,6 +161,34 @@ describe("artifact api", () => {
     expect(response.statusCode).toBe(400)
     expect(response.headers["content-type"]).toContain("application/problem+json")
     expect(response.json()).toMatchObject({ type: "about:blank", status: 400 })
+  })
+
+  it("requires the working directory on create", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: { title: "No cwd", html: "<p>x</p>" },
+    })
+    expect(response.statusCode).toBe(400)
+    expect(response.headers["content-type"]).toContain("application/problem+json")
+    expect(response.json()).toMatchObject({ type: "about:blank", status: 400 })
+
+    const empty = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: { title: "Empty cwd", html: "<p>x</p>", cwd: "  " },
+    })
+    expect(empty.statusCode).toBe(400)
+
+    // Present and non-empty: the cwd lands in meta.json verbatim.
+    const ok = await app.inject({
+      method: "POST",
+      url: "/api/v1/artifacts",
+      payload: { title: "With cwd", html: "<p>x</p>", cwd: "/home/dev/app" },
+    })
+    expect(ok.statusCode).toBe(201)
+    const detail = await app.inject({ method: "GET", url: "/api/v1/artifacts/" + SummarySchema.parse(ok.json()).id })
+    expect(ArtifactMetaSchema.parse(detail.json()).cwd).toBe("/home/dev/app")
   })
 
   it("serves raw artifact files and hands page paths to the SPA fallback", async () => {
@@ -866,11 +894,12 @@ describe("agent lane dispatch", () => {
   const createLaneArtifact = async (
     title: string,
     html: string,
+    cwd = "/tmp/redline-lane-project",
   ): Promise<z.infer<typeof SummarySchema>> => {
     const response = await laneApp.inject({
       method: "POST",
       url: "/api/v1/artifacts",
-      payload: { title: title, html: html },
+      payload: { title: title, html: html, cwd: cwd },
     })
     if (response.statusCode !== 201) throw new Error("lane fixture create failed: " + response.body)
     return SummarySchema.parse(response.json())
@@ -911,6 +940,7 @@ describe("agent lane dispatch", () => {
         title: "Lane create",
         html: "<p>lane-a</p>",
         prompt: "make it pop",
+        cwd: "/tmp/redline-lane-project",
       },
     })
     expect(response.statusCode).toBe(201)
@@ -1056,6 +1086,25 @@ describe("agent lane dispatch", () => {
     const doneView = await laneView(created.id)
     const doneMessages = doneView.threads.find((entry) => entry.id === thread.id)?.messages ?? []
     expect(doneMessages[doneMessages.length - 1]?.body).toBe("Addressed in v2. redline-note")
+  })
+
+  it("carries the create-time cwd through meta.json into the worker duty", async () => {
+    const created = await createLaneArtifact(
+      "Lane cwd duty",
+      "<p>lane-e v1</p>",
+      "/home/dev/real-project",
+    )
+    await waitForBound(created.id)
+
+    await createLaneThread(created.id, "fix the nav")
+    const replyIndex = await waitForDuty((duty) => duty.lane === "reviewer" && duty.title === "Lane cwd duty")
+    resolveDuty(replyIndex)
+
+    await iterate(created.id)
+    const workIndex = await waitForDuty((duty) => duty.lane === "worker" && duty.title === "Lane cwd duty")
+    expect(recordedDuty(workIndex).cwd).toBe("/home/dev/real-project")
+    resolveDuty(workIndex)
+    await waitFor(async () => (await laneView(created.id)).current === "v2")
   })
 
   it("skips onDocument when the artifact is no longer iterating", async () => {

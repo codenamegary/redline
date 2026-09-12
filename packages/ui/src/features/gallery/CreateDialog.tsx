@@ -9,16 +9,17 @@ export type CreateDialogProps = {
 export const CreateDialog: React.FC<CreateDialogProps> = ({ onClose }) => {
   const [title, setTitle] = React.useState("")
   const [prompt, setPrompt] = React.useState("")
+  const [cwd, setCwd] = React.useState("")
   const [html, setHtml] = React.useState("")
   const [error, setError] = React.useState<string | undefined>(undefined)
   const create = useCreateArtifactMutation()
 
   const submit = () => {
-    if (title.trim().length === 0 || html.trim().length === 0) {
-      setError("title and html are required")
+    if (title.trim().length === 0 || cwd.trim().length === 0 || html.trim().length === 0) {
+      setError("title, project directory, and html are required")
       return
     }
-    const input: CreateArtifactBody = { title: title.trim(), prompt: prompt.trim(), html: html }
+    const input: CreateArtifactBody = { title: title.trim(), prompt: prompt.trim(), cwd: cwd.trim(), html: html }
     setError(undefined)
     create.mutate(input, {
       onSuccess: onClose,
@@ -43,6 +44,17 @@ export const CreateDialog: React.FC<CreateDialogProps> = ({ onClose }) => {
             spellCheck={false}
             onChange={(event) => setTitle(event.target.value)}
             className="rounded-md border border-edge-strong bg-ink px-2.5 py-1.5 font-sans text-sm text-fog"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-mist">
+          Project directory
+          <input
+            type="text"
+            value={cwd}
+            spellCheck={false}
+            placeholder="/path/to/project"
+            onChange={(event) => setCwd(event.target.value)}
+            className="rounded-md border border-edge-strong bg-ink px-2.5 py-1.5 font-mono text-sm text-fog"
           />
         </label>
         <label className="flex flex-col gap-1 text-xs text-mist">

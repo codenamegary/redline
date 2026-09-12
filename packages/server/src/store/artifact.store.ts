@@ -187,6 +187,9 @@ export type CreateArtifactInput = {
   prompt: string
   html: string
   note?: string
+  // Project directory the artifact was produced from. Mandatory: it rides in
+  // meta.json and every later agent session spawns there.
+  cwd: string
 }
 
 export const createArtifact = async (store: Store, input: CreateArtifactInput): Promise<ArtifactMeta> => {
@@ -197,6 +200,7 @@ export const createArtifact = async (store: Store, input: CreateArtifactInput): 
     id: id,
     title: title,
     prompt: input.prompt,
+    cwd: input.cwd,
     status: "review",
     createdAt: now,
     updatedAt: now,

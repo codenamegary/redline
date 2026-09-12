@@ -133,6 +133,10 @@ export const ArtifactMetaSchema = z.object({
   id: ArtifactIdSchema,
   title: z.string().min(1).max(200),
   prompt: z.string().max(4000),
+  // Project directory the artifact was produced from. Every create since the
+  // field existed carries one; optional only so artifacts created before it
+  // still parse. Agent sessions spawn here.
+  cwd: z.string().min(1).optional(),
   status: ArtifactStatusSchema,
   createdAt: IsoTimestampSchema,
   updatedAt: IsoTimestampSchema,
