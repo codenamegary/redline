@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.3](https://github.com/codenamegary/redline/compare/v1.2.2...v1.2.3) (2026-09-12)
+
+
+### Bug Fixes
+
+* **server:** default worker prompt forbids file writes, response is the deliverable ([#66](https://github.com/codenamegary/redline/issues/66)) ([c4a5372](https://github.com/codenamegary/redline/commit/c4a53726373f9285ac271290c8e8beb4a697e3ef))
+* **ui:** hide overflow on the review shell so only the artifact and thread panes scroll ([#67](https://github.com/codenamegary/redline/issues/67)) ([19e601e](https://github.com/codenamegary/redline/commit/19e601e15dbd367766cc3e4e9999de3e24ed18bf)), closes [#65](https://github.com/codenamegary/redline/issues/65)
+
 ## [1.2.2](https://github.com/codenamegary/redline/compare/v1.2.1...v1.2.2) (2026-09-12)
 
 
