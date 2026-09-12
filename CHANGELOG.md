@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/codenamegary/redline/compare/v1.2.1...v1.2.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **skill:** warn that unknown utilities in [@apply](https://github.com/apply) silently kill artifact styling ([3fd7d58](https://github.com/codenamegary/redline/commit/3fd7d58ef4b0fdb13159d8e43ac1b004a3596452))
+
 ## [1.2.1](https://github.com/codenamegary/redline/compare/v1.2.0...v1.2.1) (2026-09-12)
 
 
