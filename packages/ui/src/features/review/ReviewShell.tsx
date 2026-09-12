@@ -204,7 +204,7 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
     buttonBase + " border-edge-strong bg-panel text-fog hover:border-hover disabled:hover:border-edge-strong"
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-screen flex-col overflow-hidden">
       {/* React 19 hoists this to the tab title; unmounting reveals
           index.html's "redline" again. */}
       <title>{artifact.title}</title>
