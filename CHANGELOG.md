@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.0](https://github.com/codenamegary/redline/compare/v1.1.1...v1.2.0) (2026-09-12)
+
+
+### Features
+
+* **server:** strip redline session-name prefixes from artifact titles at creation ([93d0773](https://github.com/codenamegary/redline/commit/93d077389182737b71a8c2a33d0429300818fc72))
+* **ui:** add the redline mark to the page header ([93d0773](https://github.com/codenamegary/redline/commit/93d077389182737b71a8c2a33d0429300818fc72))
+* **ui:** mark in the review header, artifact title as the tab title ([93d0773](https://github.com/codenamegary/redline/commit/93d077389182737b71a8c2a33d0429300818fc72))
+
 ## [1.1.1](https://github.com/codenamegary/redline/compare/v1.1.0...v1.1.1) (2026-09-11)
 
 
