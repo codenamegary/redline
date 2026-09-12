@@ -128,3 +128,31 @@ describe("ReviewShell sidebar", () => {
     expect(screen.getByRole("complementary")).toHaveStyle({ width: "420px" })
   })
 })
+
+describe("ReviewShell overflow", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
+        if (url.endsWith("/feedback")) {
+          return new Response(JSON.stringify(feedback))
+        }
+        return new Response(JSON.stringify(artifact))
+      }),
+    )
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    localStorage.clear()
+  })
+
+  it("hides overflow on the shell so only the artifact and thread panes scroll", async () => {
+    const { container } = renderShell()
+    await screen.findByText("Demo artifact")
+    expect(container.firstElementChild).toHaveClass("overflow-hidden")
+    expect(screen.getByRole("complementary")).toHaveClass("overflow-y-auto")
+  })
+})
