@@ -1,4 +1,4 @@
-import { LaneAdapter, LanePreset, SettingsDefaults } from "@redline/http-contracts/settings.models"
+import { LanePreset, SettingsDefaults } from "@redline/http-contracts/settings.models"
 import React from "react"
 
 export type LaneId = "reviewer" | "worker"
@@ -8,9 +8,9 @@ export const laneIds: LaneId[] = ["reviewer", "worker"]
 export const laneLabel = (lane: LaneId): string => (lane === "reviewer" ? "Reviewer" : "Worker")
 
 // Editable view of one lane's config; the command stays a raw string until
-// save, when splitCommand turns it back into argv.
+// save, when splitCommand turns it back into argv. Lanes are always ACP —
+// there is no adapter choice anymore.
 export type LaneForm = {
-  adapter: LaneAdapter
   preset: LanePreset
   command: string
 }
@@ -23,11 +23,6 @@ export type LanesEditorProps = {
   onChange: (update: Partial<LaneForm>) => void
   onTest: () => void
 }
-
-const adapterOptions: Array<{ value: LaneAdapter; label: string }> = [
-  { value: "acp", label: "ACP" },
-  { value: "none", label: "None (wait in the agent)" },
-]
 
 export const LanesEditor: React.FC<LanesEditorProps> = ({
   lane,
@@ -51,21 +46,6 @@ export const LanesEditor: React.FC<LanesEditorProps> = ({
   return (
     <div className="flex flex-col gap-3.5">
       <h2 className="m-0 text-[15px]">{laneLabel(lane)} lane</h2>
-      <label className="flex flex-col gap-1 text-xs text-mist">
-        Adapter
-        <select
-          value={form.adapter}
-          disabled={disabled}
-          onChange={(event) => onChange({ adapter: event.target.value as LaneAdapter })}
-          className={inputClass}
-        >
-          {adapterOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
       <label className="flex flex-col gap-1 text-xs text-mist">
         ACP preset
         <select
@@ -97,20 +77,20 @@ export const LanesEditor: React.FC<LanesEditorProps> = ({
           className={inputClass}
         />
       </label>
-      {form.adapter === "acp" ? (
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onTest}
-            disabled={disabled}
-            className={secondaryButton}
-          >
-            Test
-          </button>
-        </div>
-      ) : (
-        <p className="m-0 text-xs text-mist">None needs no validation.</p>
-      )}
+      <p className="m-0 text-xs text-mist">
+        The command that launches your agent speaking the Agent Client Protocol, e.g.{" "}
+        <code className="rounded bg-card px-1 font-mono">opencode acp</code>.
+      </p>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onTest}
+          disabled={disabled}
+          className={secondaryButton}
+        >
+          Test
+        </button>
+      </div>
     </div>
   )
 }
