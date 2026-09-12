@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { splitCommand } from "./SettingsPage"
+import { laneConfigFrom, splitCommand } from "./SettingsPage"
 
 describe("splitCommand", () => {
   it("splits on whitespace and honors double quotes", () => {
@@ -11,5 +11,13 @@ describe("splitCommand", () => {
     ])
     expect(splitCommand("  spaced \t out  ")).toEqual(["spaced", "out"])
     expect(splitCommand("")).toEqual([])
+  })
+})
+
+describe("laneConfigFrom", () => {
+  it("always saves the acp adapter", () => {
+    const config = laneConfigFrom({ preset: "custom", command: "opencode acp" })
+    expect(config.adapter).toBe("acp")
+    expect(config.acpCommand).toEqual(["opencode", "acp"])
   })
 })

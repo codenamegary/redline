@@ -19,7 +19,6 @@ export type SettingsForm = {
 }
 
 const laneFormFrom = (config: LaneConfig): LaneForm => ({
-  adapter: config.adapter,
   preset: config.preset,
   command: config.acpCommand.join(" "),
 })
@@ -35,9 +34,11 @@ const settingsFormFrom = (settings: RedlineSettings): SettingsForm => ({
   },
 })
 
-const laneConfigFrom = (form: LaneForm): LaneConfig =>
+// Lanes are always ACP now; the adapter dropdown is gone, so every save
+// pins the adapter rather than echoing whatever the settings file had.
+export const laneConfigFrom = (form: LaneForm): LaneConfig =>
   RedlineSettingsSchema.shape.reviewer.parse({
-    adapter: form.adapter,
+    adapter: "acp",
     preset: form.preset,
     acpCommand: splitCommand(form.command),
   })

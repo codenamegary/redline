@@ -3,6 +3,7 @@ import React from "react"
 import { Link, useSearchParams } from "react-router"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { Spinner } from "../../components/Spinner"
+import { RedlineMark } from "../../components/RedlineMark"
 import { StatusBadge } from "../../components/StatusBadge"
 import { numberedPins, PinsOverlay } from "./PinsOverlay"
 import { PinOffset } from "./PinsOverlay"
@@ -204,8 +205,12 @@ export const ReviewShell: React.FC<ReviewShellProps> = ({ id }) => {
 
   return (
     <div className="flex h-screen flex-col">
+      {/* React 19 hoists this to the tab title; unmounting reveals
+          index.html's "redline" again. */}
+      <title>{artifact.title}</title>
       <header className="flex items-center gap-3 border-b border-edge bg-panel px-3.5 py-2">
-        <Link to="/" className="font-bold text-redline no-underline">
+        <Link to="/" className="flex items-center gap-1.5 font-bold text-redline no-underline">
+          <RedlineMark size={18} />
           redline
         </Link>
         <span className="max-w-[28vw] overflow-hidden text-ellipsis whitespace-nowrap font-semibold">
