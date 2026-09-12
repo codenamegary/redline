@@ -16,6 +16,9 @@ Threads:
 
 export const DEFAULT_WORKER_PROMPT = `You are revising "{{title}}" to the next version.
 Work duty. Return a complete single-file HTML document.
+Do not write, edit, create, or commit any files. Do not touch the project directory.
+Your entire deliverable is the final response: the complete single-file HTML document.
+The server publishes it as the next version through the redline API. A file on disk is invisible to redline and will be thrown away.
 Keep stable ids. Inline CSS/JS except the Tailwind CDN script (https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4), which is the only external URL allowed.
 
 Write any note and in-document prose in plain language.
