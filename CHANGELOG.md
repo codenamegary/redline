@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.4](https://github.com/codenamegary/redline/compare/v1.2.3...v1.2.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **worker:** defend default worker prompt against truncation restarts ([#70](https://github.com/codenamegary/redline/issues/70)) ([0b1a64a](https://github.com/codenamegary/redline/commit/0b1a64a272691187fb54a4d05f2ba3dcddf3b4de))
+
 ## [1.2.3](https://github.com/codenamegary/redline/compare/v1.2.2...v1.2.3) (2026-09-12)
 
 
