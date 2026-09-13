@@ -237,3 +237,48 @@ describe("parseWorkResult", () => {
     expect(() => parseWorkResult("just words, sorry")).toThrow("worker returned no HTML document")
   })
 })
+
+describe("DEFAULT_WORKER_PROMPT truncation defense", () => {
+  it("declares the output-stream contract the server implements", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("Your deliverable is your output stream")
+  })
+
+  it("requires exactly one document in the stream", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("exactly one <!doctype html>")
+    expect(DEFAULT_WORKER_PROMPT).toContain("one </html>")
+  })
+
+  it("forbids a second copy or a restart from the top", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("Never emit a second copy of it")
+    expect(DEFAULT_WORKER_PROMPT).toContain("Never restart it from the top")
+  })
+
+  it("keeps narration out of the document stream", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("No narration")
+  })
+
+  it("continues at the cut point instead of restarting after a truncated reply", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain(
+      "Continue the document in your next reply at the exact character where the cut happened",
+    )
+    expect(DEFAULT_WORKER_PROMPT).toContain("Mid-tag is fine")
+    expect(DEFAULT_WORKER_PROMPT).toContain("No new <!doctype html>")
+  })
+
+  it("explains why a restart can never finish", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("truncates again at the same depth")
+  })
+
+  it("keeps the template placeholder contract intact", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("{{title}}")
+    expect(DEFAULT_WORKER_PROMPT).toContain("{{brief}}")
+    expect(DEFAULT_WORKER_PROMPT).toContain("{{batch}}")
+  })
+
+  it("still renders through buildWorkPrompt alongside the machine contract", () => {
+    const prompt = buildWorkPrompt(workerInput())
+    expect(prompt).toContain("exactly one <!doctype html>")
+    expect(prompt).toContain("<!-- redline-note: <one-sentence what changed> -->")
+    expect(prompt).toContain("No markdown fences.")
+  })
+})
