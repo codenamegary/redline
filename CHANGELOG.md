@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.5](https://github.com/codenamegary/redline/compare/v1.2.4...v1.2.5) (2026-09-15)
+
+
+### Bug Fixes
+
+* **worker:** point the worker at the seed file instead of inlining it ([#72](https://github.com/codenamegary/redline/issues/72)) ([86c7bad](https://github.com/codenamegary/redline/commit/86c7bad65f2fe707f7bf68d07dc3020409542c28))
+
 ## [1.2.4](https://github.com/codenamegary/redline/compare/v1.2.3...v1.2.4) (2026-09-13)
 
 
