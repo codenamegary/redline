@@ -116,6 +116,10 @@ describe("DEFAULT_WORKER_PROMPT", () => {
     expect(DEFAULT_WORKER_PROMPT).toContain("The server publishes it as the next version")
   })
 
+  it("states that reading is allowed while writing is not", () => {
+    expect(DEFAULT_WORKER_PROMPT).toContain("Reading files is allowed. Writing is not.")
+  })
+
   it("survives rendering: buildWorkPrompt carries the no-file-writes contract", () => {
     const prompt = buildWorkPrompt(workerInput())
     expect(prompt).toContain("Do not write, edit, create, or commit any files")
@@ -183,23 +187,20 @@ describe("buildLanePrompt", () => {
 })
 
 describe("buildSeedContext", () => {
-  it("always inlines the document with an intro line, no fences and no disk pointer", () => {
-    const seed: SeedSpec = { html: "<html><body>v1</body></html>", version: "v1" }
-    const context = buildSeedContext(workerInput({ htmlPath: "/tmp/a/v1/index.html" }), seed)
-    expect(context).toBe(
-      "Current document (v1), complete single-file HTML:\n\n<html><body>v1</body></html>",
-    )
+  it("points at the version file on disk and never inlines the document", () => {
+    const seed: SeedSpec = { version: "v1", path: "/tmp/a/v1-index.html", bytes: 1234 }
+    const context = buildSeedContext(seed)
+    expect(context).toContain("Current document (v1)")
+    expect(context).toContain("/tmp/a/v1-index.html")
+    expect(context).toContain("Read it")
+    expect(context).toContain("redline-read-failed")
+    // The whole point of the pointer: no HTML rides in the prompt.
+    expect(context).not.toContain("<html")
     expect(context).not.toContain("```")
-    expect(context).not.toContain("on disk")
-    expect(context).not.toContain("htmlPath")
   })
 
-  it("returns empty for reviewer lanes, missing seeds, and empty seeds", () => {
-    const seed: SeedSpec = { html: "<p>x</p>", version: "v1" }
-    expect(buildSeedContext(reviewerInput(), seed)).toBe("")
-    expect(buildSeedContext(workerInput())).toBe("")
-    // Empty seed: the file was unreadable when the route enqueued the duty.
-    expect(buildSeedContext(workerInput(), { html: "", version: "v1" })).toBe("")
+  it("returns empty without a seed", () => {
+    expect(buildSeedContext(undefined)).toBe("")
   })
 })
 
@@ -258,6 +259,15 @@ describe("parseWorkResult", () => {
 
   it("throws when there is no HTML document at all", () => {
     expect(() => parseWorkResult("just words, sorry")).toThrow("worker returned no HTML document")
+  })
+
+  it("detects the read-failed sentinel and surfaces its reason", () => {
+    expect(() => parseWorkResult("<!-- redline-read-failed: permission denied -->")).toThrow(
+      "worker could not read the seed: permission denied",
+    )
+    expect(() => parseWorkResult("  <!-- redline-read-failed: no such file -->  ")).toThrow(
+      "worker could not read the seed: no such file",
+    )
   })
 })
 

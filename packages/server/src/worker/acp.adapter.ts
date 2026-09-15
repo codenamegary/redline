@@ -1,8 +1,10 @@
 import { spawn } from "node:child_process"
+import { readFile, realpath, stat } from "node:fs/promises"
+import { dirname, isAbsolute, relative } from "node:path"
 
 import { hasErrorCode } from "../store/errors"
 import { LaneConfig } from "@redline/http-contracts/settings.models"
-import { buildLanePrompt, buildSeedContext, parseLaneResult } from "./duty.prompt"
+import { buildLanePrompt, buildSeedContext, documentComplete, parseLaneResult } from "./duty.prompt"
 import { AgentSession, DutyInput, DutyResult, HostAdapter, Lane, SeedSpec } from "./host.adapter"
 import { isRecord } from "./util"
 
@@ -18,9 +20,21 @@ const stderrLimit = 4000
 const logLimit = 100_000
 // ACP has no portable model selector; custom presets bake model into argv.
 const acpProtocolVersion = 1
+// Ceiling for one client-side fs/read_text_file response. The seed file can
+// be big but never unbounded.
+const defaultMaxReadBytes = 10_000_000
+// A worker document is an output stream: this many continuation prompts are
+// allowed before the duty fails. Bounded so a stuck model cannot hold the
+// lane forever.
+const workContinuationLimit = 6
+const continuationPrompt =
+  "Your previous output was cut off mid-document. Continue at the exact character where it " +
+  "stopped. Do not repeat anything already emitted. Do not restart. No preamble."
 
 export type AcpAdapterOptions = {
   getLaneConfig: (lane: Lane) => LaneConfig | Promise<LaneConfig>
+  // Test seam / deployment cap for a single read served to the agent.
+  maxReadBytes?: number
 }
 
 type Pending = { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void }
@@ -79,19 +93,59 @@ const chunkText = (update: Record<string, unknown>): string => {
 const toolTitle = (update: Record<string, unknown>): string =>
   typeof update.title === "string" && update.title.length > 0 ? update.title : "tool"
 
-const denyPermission = (params: Record<string, unknown>): unknown => {
+// Pick the first offered option whose kind is in the allowed set.
+const selectPermission = (params: Record<string, unknown>, kinds: string[]): unknown => {
   const options = Array.isArray(params.options) ? params.options : []
-  const rejectOption = options.find(
-    (option) =>
-      isRecord(option) && (option.kind === "reject_once" || option.kind === "reject_always"),
-  )
-  if (isRecord(rejectOption) && typeof rejectOption.optionId === "string") {
-    return { outcome: { outcome: "selected", optionId: rejectOption.optionId } }
+  for (const kind of kinds) {
+    const option = options.find((entry) => isRecord(entry) && entry.kind === kind)
+    if (isRecord(option) && typeof option.optionId === "string") {
+      return { outcome: { outcome: "selected", optionId: option.optionId } }
+    }
   }
   return { outcome: { outcome: "cancelled" } }
 }
 
-const openConnection = (argv: string[]): Connection => {
+// True when target sits inside root (or is root itself). Both are canonical
+// absolute paths, so a relative segment that climbs out fails the check.
+const isWithinRoot = (root: string, target: string): boolean => {
+  const rel = relative(root, target)
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))
+}
+
+// Read-only tool calls are allowed when every location resolves inside the
+// session's read roots. Writes, execution, and anything we cannot verify
+// stay denied.
+const permissionResponse = async (
+  params: Record<string, unknown>,
+  roots: Promise<string[]>,
+): Promise<unknown> => {
+  const toolCall = isRecord(params.toolCall) ? params.toolCall : undefined
+  const locations =
+    toolCall !== undefined && Array.isArray(toolCall.locations) ? toolCall.locations : []
+  if (toolCall?.kind === "read" && locations.length > 0) {
+    const paths = locations.map((location) =>
+      isRecord(location) && typeof location.path === "string" ? location.path : undefined,
+    )
+    if (paths.every((path): path is string => path !== undefined)) {
+      const canonical = await Promise.all(paths.map((path) => realpath(path).catch(() => undefined)))
+      const allowedRoots = await roots
+      if (
+        allowedRoots.length > 0 &&
+        canonical.every(
+          (path) => path !== undefined && allowedRoots.some((root) => isWithinRoot(root, path)),
+        )
+      ) {
+        return selectPermission(params, ["allow_once", "allow_always"])
+      }
+    }
+  }
+  return selectPermission(params, ["reject_once", "reject_always"])
+}
+
+const openConnection = (
+  argv: string[],
+  options?: { readRoots?: string[]; maxReadBytes?: number },
+): Connection => {
   const command = argv[0] ?? ""
   const proc = spawn(command, argv.slice(1), { stdio: ["pipe", "pipe", "pipe"] })
   const pending = new Map<number, Pending>()
@@ -100,6 +154,12 @@ const openConnection = (argv: string[]): Connection => {
   let log = ""
   let stderrText = ""
   let exitDetail: string | undefined
+  const maxReadBytes = options?.maxReadBytes ?? defaultMaxReadBytes
+  // Canonicalize once: symlinked roots (macOS /tmp, /var) must line up with
+  // the canonicalized request path. Roots that cannot be resolved never match.
+  const readRoots = Promise.all(
+    (options?.readRoots ?? []).map((root) => realpath(root).catch(() => undefined)),
+  ).then((roots) => roots.filter((root): root is string => root !== undefined))
 
   // Human-readable session transcript: agent text as-is, tool activity as
   // one line each. Tail-capped.
@@ -111,6 +171,35 @@ const openConnection = (argv: string[]): Connection => {
     exitDetail = detail
     for (const entry of pending.values()) entry.reject(new Error(detail))
     pending.clear()
+  }
+
+  // The agent asks the client to read a file (ACP client method). Serve only
+  // canonical paths under the session's read roots, cap the payload, and
+  // honor the protocol's line/limit window.
+  const serveRead = async (params: Record<string, unknown>): Promise<{ content: string }> => {
+    const requested = typeof params.path === "string" ? params.path : undefined
+    if (requested === undefined || requested.length === 0) {
+      throw new Error("fs/read_text_file requires a path")
+    }
+    const resolved = await realpath(requested)
+    const roots = await readRoots
+    if (!roots.some((root) => isWithinRoot(root, resolved))) {
+      throw new Error("path is outside the allowed read roots: " + requested)
+    }
+    const info = await stat(resolved)
+    if (!info.isFile()) throw new Error("not a regular file: " + requested)
+    if (info.size > maxReadBytes) {
+      throw new Error("file exceeds the " + String(maxReadBytes) + " byte read limit: " + requested)
+    }
+    let content = await readFile(resolved, "utf8")
+    const line = typeof params.line === "number" ? params.line : undefined
+    const limit = typeof params.limit === "number" ? params.limit : undefined
+    if (line !== undefined || limit !== undefined) {
+      const lines = content.split("\n")
+      const start = Math.max((line ?? 1) - 1, 0)
+      content = lines.slice(start, limit === undefined ? undefined : start + limit).join("\n")
+    }
+    return { content: content }
   }
 
   proc.on("error", (error) => {
@@ -159,7 +248,18 @@ const openConnection = (argv: string[]): Connection => {
 
     if (method !== undefined && id !== undefined) {
       if (method === "session/request_permission" && isRecord(message.params)) {
-        send({ jsonrpc: "2.0", id, result: denyPermission(message.params) })
+        void permissionResponse(message.params, readRoots).then(
+          (result) => send({ jsonrpc: "2.0", id, result }),
+          () => send({ jsonrpc: "2.0", id, result: { outcome: { outcome: "cancelled" } } }),
+        )
+      } else if (method === "fs/read_text_file" && isRecord(message.params)) {
+        void serveRead(message.params).then(
+          (result) => send({ jsonrpc: "2.0", id, result }),
+          (error: unknown) => {
+            const detail = error instanceof Error ? error.message : String(error)
+            send({ jsonrpc: "2.0", id, error: { code: -32000, message: detail } })
+          },
+        )
       } else {
         send({
           jsonrpc: "2.0",
@@ -321,7 +421,7 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     const state = sessions.get(hostSessionId)
     if (state === undefined || input.lane !== "worker" || state.seeded) return ""
     state.seeded = true
-    return buildSeedContext(input, state.seed)
+    return buildSeedContext(state.seed)
   }
 
   const ensureSession = async (
@@ -333,7 +433,19 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     const config = await options.getLaneConfig(lane)
     const argv = config.acpCommand
     if (argv.length === 0 || (argv[0] ?? "").length === 0) throw new Error("acp command is empty")
-    const connection = openConnection(argv)
+    // Worker sessions may read the seed file (artifact dir) and the project
+    // that produced it. Reviewer sessions get no read roots: their contract
+    // is thread text only.
+    const readRoots =
+      lane === "worker"
+        ? [seed === undefined ? undefined : dirname(seed.path), cwd].filter(
+            (root): root is string => root !== undefined,
+          )
+        : []
+    const connection = openConnection(argv, {
+      readRoots: readRoots,
+      maxReadBytes: options.maxReadBytes,
+    })
     sessionCounter += 1
     const hostSessionId = "acp-" + artifactId + "-" + String(sessionCounter)
     try {
@@ -353,14 +465,34 @@ export const createAcpAdapter = (options: AcpAdapterOptions): AcpAdapter => {
     const base = buildLanePrompt(input)
     const prompt = seedPrefix.length > 0 ? seedPrefix + "\n\n" + base : base
     state.connection.resetChunks()
-    // No duty timeout: the turn ends when the agent ends it, the process
-    // dies, or the user stops the round (interrupt kills the connection,
-    // which rejects the in-flight prompt request).
-    await state.connection.request("session/prompt", {
-      sessionId: state.sessionId,
-      prompt: [{ type: "text", text: prompt }],
-    })
-    const raw = state.connection.takeChunks()
+    const promptTurn = (text: string): Promise<unknown> =>
+      // No duty timeout: the turn ends when the agent ends it, the process
+      // dies, or the user stops the round (interrupt kills the connection,
+      // which rejects the in-flight prompt request).
+      state.connection.request("session/prompt", {
+        sessionId: state.sessionId,
+        prompt: [{ type: "text", text: text }],
+      })
+    await promptTurn(prompt)
+    let raw = state.connection.takeChunks()
+    // A worker document is delivered as an output stream, so a turn can end
+    // mid-document when the model hits its reply budget. Continue the stream
+    // until it closes; a turn that adds nothing means the model is stuck, so
+    // stop early rather than burning the whole cap. A complete document is
+    // done even when the harness reports max_tokens.
+    if (input.lane === "worker") {
+      let continuations = 0
+      while (!documentComplete(raw) && continuations < workContinuationLimit) {
+        const before = raw.length
+        continuations += 1
+        await promptTurn(continuationPrompt)
+        raw = state.connection.takeChunks()
+        if (raw.length === before) break
+      }
+      if (!documentComplete(raw) && /<html|<!doctype/i.test(raw)) {
+        throw new Error("worker output truncated")
+      }
+    }
     return parseLaneResult(input.lane, raw)
   }
 

@@ -114,16 +114,33 @@ export const buildWorkPrompt = (input: DutyInput): string =>
     batch: input.batchThreadIds ?? [],
   }) + repoContext(input) + workContract
 
-// First duty on a worker lane carries the document inline: spawned agents
-// get ACP permission requests auto-denied, so a "read the file on disk"
-// pointer is typically unreadable and the spec allows shipping the document
-// in the first message instead. An empty seed (file unreadable at enqueue
-// time) inlines nothing. Reviewer lanes never get HTML. Callers own the
+// The first worker duty is handed a pointer, never the document itself:
+// inlining the whole HTML in the prompt invites the model to echo it and
+// spends context on large artifacts. The adapter makes the file readable
+// through ACP (client fs/read_text_file plus read-only permission allowance
+// for the artifact dir and the project cwd). Callers own the
 // once-per-session tracking via their seeded flag.
-export const buildSeedContext = (input: DutyInput, seed?: SeedSpec): string => {
-  if (seed === undefined || input.lane !== "worker" || seed.html.length === 0) return ""
-  return "Current document (" + seed.version + "), complete single-file HTML:\n\n" + seed.html
+export const seedReadFailedMarker = "redline-read-failed"
+
+export const buildSeedContext = (seed?: SeedSpec): string => {
+  if (seed === undefined) return ""
+  return (
+    "Current document (" +
+    seed.version +
+    ") is on disk as one complete single-file HTML document (" +
+    String(seed.bytes) +
+    " bytes). Read it with your file read tool before making any change:\n" +
+    seed.path +
+    "\n\nIf you cannot read that file, do not guess and do not rewrite from scratch. " +
+    "Reply with exactly this line and nothing else:\n<!-- " +
+    seedReadFailedMarker +
+    ": <short reason> -->"
+  )
 }
+
+// A worker stream is complete only when the document closes. The adapter
+// uses this to decide whether a continuation prompt is due.
+export const documentComplete = (raw: string): boolean => /<\/html>/i.test(raw)
 
 // One prompt builder and one parser per lane, shared by every adapter so
 // the reviewer/worker switch lives in exactly one place.
@@ -162,6 +179,14 @@ const lastMatchIndex = (raw: string, pattern: RegExp): number => {
 }
 
 export const parseWorkResult = (raw: string): DutyResult => {
+  // The seed pointer asks the worker to bail out with a sentinel when the
+  // current document is unreadable. Surface the reason instead of letting
+  // the failure look like a generic missing document.
+  const readFailed = /<!--\s*redline-read-failed:\s*([\s\S]*?)-->/i.exec(raw)
+  if (readFailed !== null) {
+    const reason = (readFailed[1] ?? "").trim()
+    throw new Error("worker could not read the seed" + (reason === "" ? "" : ": " + reason))
+  }
   // The contract asks for a leading redline-note comment; it may sit before
   // the doctype, so search the prefix ahead of <html> for it and strip it
   // before cutting the document bounds.

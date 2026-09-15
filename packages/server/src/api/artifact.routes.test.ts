@@ -1071,9 +1071,12 @@ describe("agent lane dispatch", () => {
     expect(duty.threads.map((entry) => entry.id)).toEqual([thread.id])
     expect(duty.targets).toEqual([])
     expect(duty.promptTemplate).toBe(DEFAULT_WORKER_PROMPT)
-    expect(duty.htmlPath).toBe(join(laneHome, "artifacts", created.id, "v1-index.html"))
     const workerSeed = recorded.seeds.find((seed) => seed !== undefined)
-    expect(workerSeed).toEqual({ html: "<p>lane-d v1</p>", version: "v1" })
+    expect(workerSeed).toEqual({
+      version: "v1",
+      path: join(laneHome, "artifacts", created.id, "v1-index.html"),
+      bytes: 16,
+    })
 
     resolveDuty(workIndex)
     await waitFor(async () => {
@@ -1105,6 +1108,36 @@ describe("agent lane dispatch", () => {
     expect(recordedDuty(workIndex).cwd).toBe("/home/dev/real-project")
     resolveDuty(workIndex)
     await waitFor(async () => (await laneView(created.id)).current === "v2")
+  })
+
+  it("fails fast when the current version file is missing", async () => {
+    const created = await createLaneArtifact("Lane missing seed", "<p>lane-h v1</p>")
+    await waitForBound(created.id)
+
+    const thread = await createLaneThread(created.id, "tweak it")
+    const replyIndex = await waitForDuty(
+      (duty) => duty.lane === "reviewer" && duty.title === "Lane missing seed",
+    )
+    resolveDuty(replyIndex)
+
+    rmSync(join(laneHome, "artifacts", created.id, "v1-index.html"))
+    const response = await laneApp.inject({
+      method: "POST",
+      url: "/api/v1/artifacts/" + created.id + "/iterations",
+      payload: {},
+    })
+    expect(response.statusCode).toBe(409)
+    // The lane failed before any worker session spawned, and the round
+    // rolled back with a pointer to the problem.
+    const view = await laneView(created.id)
+    expect(view.artifactStatus).toBe("review")
+    const messages = view.threads.find((entry) => entry.id === thread.id)?.messages ?? []
+    expect(messages[messages.length - 1]?.body).toContain(
+      "Iteration failed: current document is unreadable on disk",
+    )
+    expect(
+      recorded.duties.some((duty) => duty.lane === "worker" && duty.title === "Lane missing seed"),
+    ).toBe(false)
   })
 
   it("skips onDocument when the artifact is no longer iterating", async () => {

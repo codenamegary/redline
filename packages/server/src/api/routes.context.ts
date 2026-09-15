@@ -346,10 +346,18 @@ const dispatchIteration = async (
   const view = await readFeedbackView(store, id)
   const batchThreads = view.threads.filter((thread) => batchThreadIds.includes(thread.id))
   // Current version's document on disk: <home>/artifacts/<id>/vN-index.html.
+  // The worker gets a pointer to this file, never the document inline. A
+  // missing or empty file means there is nothing to revise: fail the round
+  // before spending a worker session on a from-scratch rewrite.
   const htmlPath = artifactVersionFile(store, id, meta.current)
-  const seed: SeedSpec = {
-    html: await readFile(htmlPath, "utf8").catch(() => ""),
-    version: meta.current,
+  let seed: SeedSpec
+  try {
+    const html = await readFile(htmlPath, "utf8")
+    if (html.length === 0) throw new Error("empty document")
+    seed = { version: meta.current, path: htmlPath, bytes: Buffer.byteLength(html) }
+  } catch {
+    await dispatcher.fail(id, "worker", "current document is unreadable on disk")
+    return false
   }
   const bound = await waitForLaneBind(id, "worker")
   const enqueued = dispatcher.enqueueWork(
@@ -363,7 +371,6 @@ const dispatchIteration = async (
       threads: batchThreads,
       targets: [],
       batchThreadIds: batchThreadIds,
-      htmlPath: htmlPath,
       // From meta.json: the worker session spawns in the project directory
       // recorded at create time.
       cwd: meta.cwd,

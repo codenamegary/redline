@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { AcpAdapter, createAcpAdapter } from "./acp.adapter"
+import { AcpAdapter, AcpAdapterOptions, createAcpAdapter } from "./acp.adapter"
 import { DEFAULT_REVIEWER_PROMPT, DEFAULT_WORKER_PROMPT } from "./prompts"
 import { Thread } from "@redline/http-contracts/artifact.models"
 import { LaneConfig } from "@redline/http-contracts/settings.models"
@@ -77,7 +77,10 @@ const laneConfig = (argv: string[]): LaneConfig => ({
   acpCommand: argv,
 })
 
-const makeAdapter = (commands: { reviewer?: string[]; worker?: string[] }): AcpAdapter =>
+const makeAdapter = (
+  commands: { reviewer?: string[]; worker?: string[] },
+  options?: Partial<AcpAdapterOptions>,
+): AcpAdapter =>
   createAcpAdapter({
     getLaneConfig: async (lane) =>
       laneConfig(
@@ -85,6 +88,7 @@ const makeAdapter = (commands: { reviewer?: string[]; worker?: string[] }): AcpA
           ? (commands.reviewer ?? [])
           : (commands.worker ?? commands.reviewer ?? []),
       ),
+    ...options,
   })
 
 const iso = "2026-01-01T00:00:00.000Z"
@@ -139,35 +143,171 @@ describe("acp adapter", () => {
     await adapter.discard(session)
   })
 
-  it("inlines the seed html even when an htmlPath exists on disk", async () => {
+  it("points the worker at the seed and serves the file through the client", async () => {
     const workspace = makeWorkspace()
-    const htmlPath = join(workspace, "index.html")
-    writeFileSync(htmlPath, "<html><body>v1</body></html>", "utf8")
-    const { argv } = fixtureCommand(workspace)
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "SEED-CONTENT-v1", "utf8")
+    const { argv } = fixtureCommand(workspace, ["--read", seedPath])
     const adapter = makeAdapter({ worker: argv })
-    const seed: SeedSpec = { html: "<html><body>v1</body></html>", version: "v1" }
-    const session = await adapter.ensureSession("worker", "a1", seed)
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 15 }
 
-    const result = await adapter.runDuty(session, workerInput({ htmlPath }))
-    // The note marker proves the document shipped inline: spawned agents get
-    // permission requests denied, so a disk pointer would be unreadable.
-    expect(result.kind === "document" && result.note).toBe("note from inline prompt")
-    expect(result.kind === "document" && result.html).toContain("fake v-next")
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    // The fixture calls fs/read_text_file and folds what it got into its
+    // note, proving the client served the pointer path.
+    const note = result.kind === "document" ? result.note : ""
+    expect(note).toContain("note from pointer prompt")
+    expect(note).toContain("read-ok")
+    expect(note).toContain("SEED-CONTENT-v1")
     await adapter.discard(session)
   })
 
-  it("inlines the seed html without a path, once per session", async () => {
+  it("denies reads outside the artifact dir and project cwd", async () => {
     const workspace = makeWorkspace()
+    const other = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "<html><body>v1</body></html>", "utf8")
+    const secret = join(other, "secret.txt")
+    writeFileSync(secret, "top secret", "utf8")
+    const { argv } = fixtureCommand(workspace, ["--read", secret])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 30 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    const note = result.kind === "document" ? result.note : ""
+    expect(note).toContain("read-error")
+    expect(note).not.toContain("top secret")
+    await adapter.discard(session)
+  })
+
+  it("caps the bytes a single read serves", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "x".repeat(64), "utf8")
+    const { argv } = fixtureCommand(workspace, ["--read", seedPath])
+    const adapter = makeAdapter({ worker: argv }, { maxReadBytes: 8 })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 64 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    const note = result.kind === "document" ? result.note : ""
+    expect(note).toContain("read-error")
+    expect(note).toContain("exceeds")
+    await adapter.discard(session)
+  })
+
+  it("allows a read permission request inside the session roots", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "<html><body>v1</body></html>", "utf8")
+    const { argv } = fixtureCommand(workspace, ["--permission-read", seedPath])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 30 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    expect(result.kind === "document" && result.note).toContain("perm-allow")
+    await adapter.discard(session)
+  })
+
+  it("denies a read permission request outside the session roots", async () => {
+    const workspace = makeWorkspace()
+    const other = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "<html><body>v1</body></html>", "utf8")
+    const secret = join(other, "secret.txt")
+    writeFileSync(secret, "top secret", "utf8")
+    const { argv } = fixtureCommand(workspace, ["--permission-read", secret])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 30 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    expect(result.kind === "document" && result.note).toContain("perm-deny")
+    await adapter.discard(session)
+  })
+
+  it("denies a write permission request even inside the session roots", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "<html><body>v1</body></html>", "utf8")
+    const { argv } = fixtureCommand(workspace, ["--permission-write", seedPath])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 30 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    expect(result.kind === "document" && result.note).toContain("perm-deny")
+    await adapter.discard(session)
+  })
+
+  it("ships the pointer context once per session", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "<html><body>v1</body></html>", "utf8")
     const { argv } = fixtureCommand(workspace)
     const adapter = makeAdapter({ worker: argv })
-    const seed: SeedSpec = { html: "<html><body>v1</body></html>", version: "v1" }
-    const session = await adapter.ensureSession("worker", "a1", seed)
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 30 }
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
 
     const first = await adapter.runDuty(session, workerInput())
-    expect(first.kind === "document" && first.note).toBe("note from inline prompt")
+    expect(first.kind === "document" && first.note).toBe("note from pointer prompt")
     // Seed context ships only on the first duty of a session.
     const second = await adapter.runDuty(session, workerInput())
     expect(second.kind === "document" && second.note).toBe("fake iteration note")
+    await adapter.discard(session)
+  })
+
+  it("continues a truncated worker document instead of accepting it", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "SEED", "utf8")
+    const promptFile = join(workspace, "prompts.txt")
+    const { argv } = fixtureCommand(workspace, ["--truncate-once", "--prompt-file", promptFile])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 4 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    const result = await adapter.runDuty(session, workerInput())
+    const html = result.kind === "document" ? result.html : ""
+    expect(html).toContain("<p>fake v-next</p>")
+    expect(html.endsWith("</html>")).toBe(true)
+    // The continued stream is one document, not a restart.
+    expect((html.match(/<!doctype/gi) ?? []).length).toBe(1)
+    expect(readFileSync(promptFile, "utf8")).toBe("2")
+    await adapter.discard(session)
+  })
+
+  it("fails after the continuation cap when the worker never finishes", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "SEED", "utf8")
+    const promptFile = join(workspace, "prompts.txt")
+    const { argv } = fixtureCommand(workspace, ["--truncate-always", "--prompt-file", promptFile])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 4 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    await rejectsWith(adapter.runDuty(session, workerInput()), "worker output truncated")
+    // One initial turn plus six continuations.
+    expect(readFileSync(promptFile, "utf8")).toBe("7")
+    await adapter.discard(session)
+  })
+
+  it("stops continuing when a turn makes no progress", async () => {
+    const workspace = makeWorkspace()
+    const seedPath = join(workspace, "v1-index.html")
+    writeFileSync(seedPath, "SEED", "utf8")
+    const promptFile = join(workspace, "prompts.txt")
+    const { argv } = fixtureCommand(workspace, ["--truncate-stall", "--prompt-file", promptFile])
+    const adapter = makeAdapter({ worker: argv })
+    const seed: SeedSpec = { version: "v1", path: seedPath, bytes: 4 }
+
+    const session = await adapter.ensureSession("worker", "a1", seed, workspace)
+    await rejectsWith(adapter.runDuty(session, workerInput()), "worker output truncated")
+    // The stalled continuation ends the loop instead of burning the cap.
+    expect(readFileSync(promptFile, "utf8")).toBe("2")
     await adapter.discard(session)
   })
 
@@ -204,8 +344,9 @@ describe("acp adapter", () => {
     const { argv } = fixtureCommand(workspace, ["--tool-call"])
     const adapter = makeAdapter({ worker: argv })
     const session = await adapter.ensureSession("worker", "a1", {
-      html: "<html><body>v1</body></html>",
       version: "v1",
+      path: join(workspace, "v1-index.html"),
+      bytes: 30,
     })
 
     await adapter.runDuty(session, workerInput())
