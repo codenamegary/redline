@@ -6,7 +6,7 @@ export type AdapterId = "acp" | "none"
 
 export type AgentSession = { artifactId: string; lane: Lane; hostSessionId: string }
 
-export type SeedSpec = { html: string; version: string }
+export type SeedSpec = { version: string; path: string; bytes: number }
 
 // Thinking placeholder a duty must fill with a real reply.
 export type ThreadRef = { threadId: string; messageId: string }
@@ -22,8 +22,6 @@ export type DutyInput = {
   targets: ThreadRef[]
   // Frozen batch (worker lane).
   batchThreadIds?: string[]
-  // Absolute path to the current index.html on disk (worker lane seed hint).
-  htmlPath?: string
   // Project directory for the duty. Sessions spawn there so duties can
   // read the repo that produced the artifact.
   cwd?: string

@@ -190,7 +190,7 @@ describe("dispatcher", () => {
     dispatcher.attachWorker("a1")
     await waitFor(() => dispatcher.presence("a1").workerBound)
 
-    const seed: SeedSpec = { html: "<p>v1</p>", version: "v1" }
+    const seed: SeedSpec = { version: "v1", path: "/tmp/a/v1-index.html", bytes: 16 }
     fake.hold()
     expect(
       dispatcher.enqueueWork(
@@ -310,7 +310,7 @@ describe("dispatcher", () => {
 
     fake.hold()
     fake.results.push({ kind: "document", html: "<p>v2</p>", note: "footer" })
-    const seed: SeedSpec = { html: "<p>v1</p>", version: "v1" }
+    const seed: SeedSpec = { version: "v1", path: "/tmp/a/v1-index.html", bytes: 16 }
     expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), seed)).toBe(true)
     await waitFor(() => fake.dutyCalls.length === 1)
     expect(dispatcher.presence("a1")).toEqual({
@@ -348,7 +348,7 @@ describe("dispatcher", () => {
     await waitFor(() => dispatcher.presence("a1").workerBound)
 
     fake.results.push({ kind: "document", html: "<p>v2</p>", note: "footer" })
-    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { html: "<p>v1</p>", version: "v1" })).toBe(true)
+    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { version: "v1", path: "/tmp/a/v1-index.html", bytes: 16 })).toBe(true)
     await waitFor(() => events.length === 1)
     // The session the duty flew on is discarded after onDocument delivers.
     await waitFor(() => fake.discards.length === 1)
@@ -357,7 +357,7 @@ describe("dispatcher", () => {
     // A second Iterate gets a fresh session; the previous one was already
     // discarded, so exactly one live session existed at any time.
     fake.results.push({ kind: "document", html: "<p>v3</p>", note: "nav" })
-    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { html: "<p>v2</p>", version: "v2" })).toBe(true)
+    expect(dispatcher.enqueueWork("a1", dutyInput({ lane: "worker" }), { version: "v2", path: "/tmp/a/v2-index.html", bytes: 16 })).toBe(true)
     await waitFor(() => events.length === 2)
     await waitFor(() => fake.discards.length === 2)
     expect(fake.ensureCalls).toHaveLength(2)
